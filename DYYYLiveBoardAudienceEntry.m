@@ -3,12 +3,19 @@
 // ② 点按钮打开榜单页（包一层导航控制器 modal 全屏呈现，带“关闭”按钮）。
 // 硬约束：不改任何原生 view 的 frame，不在 layoutSubviews 里做任何事，
 // 不订阅任何通知；按钮只用自己的 Auto Layout 约束定位；找不到标题栏时
-// 静默返回，不弹提示；2.2-9-87 起每次尝试都把结果写进一条诊断 defaults
-//（DYYYLiveBoardEntryDiag），供榜单设置页页脚现读现显。
+// 静默返回，不弹提示；2.2-9-87 起每次尝试都把结果写进诊断 defaults
+//（DYYYLiveBoardEntryDiag 单条 + 2.2-9-89 起最近 3 条环
+// DYYYLiveBoardEntryDiagRing），供榜单设置页页脚现读现显。
 // 2.2-9-88：① 进房间后 1 秒轮询 watcher（StartWatcher/StopWatcher）；
 // ② 自家榜单/设置页（类名 DYYY 开头）触发时跳过安装与诊断，不再覆盖
 // 真实诊断；③ 快路只认“可见”的已装按钮，藏在预建面板里的旧按钮不再
 // 挡住重装；④ 找不到标题时诊断另记窗口顶层视图类名与标签总数。
+// 2.2-9-89：① 诊断改成最近 3 条环（设置页页脚全显，读诊断的动作本身
+// 再也盖不掉面板打开那一刻的记录）；② 排除类名含 "Setting" 的触发 VC
+//（抖音设置宿主 AWESettingBaseViewController 在 -88 漏网）；③ watcher
+// 每跳写心跳（上一跳时间 + 跳数），页脚可验证 watcher 是不是真在跑；
+// ④ 找不到“在线观众”标题时，改用面板 tab 标签“贡献榜/高等级”作第二
+// 锚点定位面板、把按钮放到标题行左端。
 #import "DYYYLiveBoardAudienceEntry.h"
 #import "DYYYLiveBoardStore.h"
 #import "DYYYLiveBoardUI.h"
@@ -27,9 +34,17 @@ static __weak UIButton *gInstalledEntryButton = nil;
 
 // 2.2-9-88：自家页面判定。榜单页/设置页的类名都以 DYYY 开头，抖音
 // 自己的 VC 没有这个前缀；观众面板永远不在自家页面里。
+// 2.2-9-89：再排除类名含 "Setting" 的触发 VC——抖音设置宿主
+// AWESettingBaseViewController 不以 DYYY 开头，-88 的守卫漏了它；用户
+// 一打开设置读诊断，AWESettingBaseViewController 的出现/呈现就触发一次
+// 安装，面板关着当然找不到标题，又把真实诊断覆盖掉（观察者效应）。
+// 观众面板的 VC 类名里不会有 "Setting"，排除它是安全的。
 BOOL DYYYLiveBoardAudienceEntryIsOwnViewController(UIViewController *vc) {
     if (!vc) return NO;
-    return [NSStringFromClass(vc.class) hasPrefix:@"DYYY"];
+    NSString *name = NSStringFromClass(vc.class);
+    if ([name hasPrefix:@"DYYY"]) return YES;
+    if ([name rangeOfString:@"Setting"].location != NSNotFound) return YES;
+    return NO;
 }
 
 // 2.2-9-88：已装按钮是不是真的可见。只看 window 不够：按钮可能装进了
@@ -54,6 +69,14 @@ static void DYYYLiveBoardAudienceEntryInstallWithDiag(UIViewController *audience
 static NSTimer *gDYYYLiveBoardEntryWatcherTimer = nil;
 static __weak UIViewController *gDYYYLiveBoardEntryWatcherRoomVC = nil;
 
+// 2.2-9-89：watcher 心跳。每次 tick 写一条 "HH:mm:ss 第N跳" 到 defaults
+//（另记一条时间戳供页脚判断新鲜度），榜单设置页页脚现读现显——没有心跳，
+// 就证明 watcher 根本没在跑；心跳停在进房间之前，说明 watcher 启动过
+// 但后来停了。心跳键定义在这里是因为 StartWatcher 在诊断键定义之前。
+static NSString *const kDYYYLiveBoardEntryWatcherBeatKey = @"DYYYLiveBoardEntryWatcherBeat";
+static NSString *const kDYYYLiveBoardEntryWatcherBeatAtKey = @"DYYYLiveBoardEntryWatcherBeatAt";
+static NSUInteger gDYYYLiveBoardEntryWatcherTickCount = 0;
+
 void DYYYLiveBoardAudienceEntryStartWatcher(UIViewController *roomVC) {
     if (![NSThread isMainThread]) {
         dispatch_async(dispatch_get_main_queue(), ^{ DYYYLiveBoardAudienceEntryStartWatcher(roomVC); });
@@ -63,6 +86,7 @@ void DYYYLiveBoardAudienceEntryStartWatcher(UIViewController *roomVC) {
     [gDYYYLiveBoardEntryWatcherTimer invalidate];
     gDYYYLiveBoardEntryWatcherTimer = nil;
     gDYYYLiveBoardEntryWatcherRoomVC = roomVC;
+    gDYYYLiveBoardEntryWatcherTickCount = 0;
     __weak UIViewController *weakRoom = roomVC;
     gDYYYLiveBoardEntryWatcherTimer = [NSTimer timerWithTimeInterval:1.0 repeats:YES block:^(__unused NSTimer *timer) {
         UIViewController *room = weakRoom;
@@ -72,6 +96,19 @@ void DYYYLiveBoardAudienceEntryStartWatcher(UIViewController *roomVC) {
         }
         // 后台不刷（直播间只在前台看得到）。
         if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
+        // 2.2-9-89：心跳——每跳都写，页脚能直接验证 watcher 是不是真在跑。
+        // 心跳不停，说明 watcher 活着；心跳停了，说明房间已退出或 watcher
+        // 被停掉。心跳写在 Install 之前，这样即使 Install 本身提前返回，
+        // 心跳也照常记录。
+        gDYYYLiveBoardEntryWatcherTickCount++;
+        NSDateFormatter *beatFormatter = [[NSDateFormatter alloc] init];
+        beatFormatter.dateFormat = @"HH:mm:ss";
+        NSString *beat = [NSString stringWithFormat:@"%@ 第%lu跳",
+                          [beatFormatter stringFromDate:[NSDate date]],
+                          (unsigned long)gDYYYLiveBoardEntryWatcherTickCount];
+        [NSUserDefaults.standardUserDefaults setObject:beat forKey:kDYYYLiveBoardEntryWatcherBeatKey];
+        [NSUserDefaults.standardUserDefaults setDouble:[[NSDate date] timeIntervalSince1970]
+                                                forKey:kDYYYLiveBoardEntryWatcherBeatAtKey];
         // watcher 每跳不写“找不到标题”的诊断：面板没打开时本来就找不到，
         // 写了会把面板打开那一刻的真实诊断冲掉；只有找到标题（面板在场）
         // 或已装上时才记，见 InstallWithDiag 的 recordDiag 分支。
@@ -148,7 +185,61 @@ static UILabel *DYYYLiveBoardFindAudienceTitleLabel(UIView *view) {
     return nil;
 }
 
-// 从标题 label 往上找标题栏：第一层足够宽、且标题左缘留得出入口位置的祖先。
+// 2.2-9-89：第二锚点。面板的 tab 标签（截图里看得见的“贡献榜 (99+)",
+// “高等级 (66)”、"千钻贡献"、"星守护"）是面板在场的铁证；如果“在线观众”
+// 标题根本不是 UILabel（比如 Lynx 渲染），标题路找不到，tab 标签仍能
+// 定位面板。只认前缀（后面跟的 "(99+)" 人数会变），attributedText 也认。
+static UILabel *DYYYLiveBoardFindTabLabel(UIView *view) {
+    if (!view) return nil;
+    if ([view isKindOfClass:UILabel.class]) {
+        UILabel *label = (UILabel *)view;
+        NSString *text = label.text.length ? label.text : label.attributedText.string;
+        if ([text hasPrefix:@"贡献榜"] || [text hasPrefix:@"高等级"]) return label;
+    }
+    for (UIView *sub in view.subviews) {
+        UILabel *found = DYYYLiveBoardFindTabLabel(sub);
+        if (found) return found;
+    }
+    return nil;
+}
+
+// 两段式查找：先在 room VC 的 view 子树里找（面板是房间 view 里的子视图
+// 时），找不到再扫各 window（面板是单独呈现的 sheet 时）。finder 是
+// 上面两个查找函数之一。
+typedef UILabel *(*DYYYLiveBoardLabelFinder)(UIView *view);
+static UILabel *DYYYLiveBoardFindLabel(UIView *rootView, DYYYLiveBoardLabelFinder finder) {
+    UILabel *found = finder(rootView);
+    if (found) return found;
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        found = finder(window);
+        if (found) return found;
+    }
+    return nil;
+}
+
+// 2.2-9-89：tab 锚点的容器。往上最多走 5 层，宽 ≥200、高 30–200
+//（tab 行的容器可能比标题栏高，30–120 不够；整屏高的房间根视图仍被
+// 高度 guard 挡在外面）。tab 行容器常是横向滚动视图（clipsToBounds=YES）：
+// 按钮要往上 44pt 放到标题行，会被它裁掉，所以优先找不裁剪的祖先；
+// 5 层里找不到不裁剪的，才退回第一个合尺寸的容器。
+static UIView *DYYYLiveBoardEntryContainerForTabLabel(UILabel *tabLabel) {
+    UIView *firstFit = nil;
+    UIView *candidate = tabLabel.superview;
+    for (NSInteger level = 0; level < 5 && candidate; level++) {
+        CGFloat containerWidth = CGRectGetWidth(candidate.bounds);
+        CGFloat containerHeight = CGRectGetHeight(candidate.bounds);
+        if (containerWidth >= 200.0 && containerHeight >= 30.0 && containerHeight <= 200.0) {
+            if (!firstFit) firstFit = candidate;
+            if (!candidate.clipsToBounds && ![candidate isKindOfClass:UIScrollView.class]) return candidate;
+        }
+        candidate = candidate.superview;
+    }
+    return firstFit;
+}
+
+// 标题行与 tab 行的中心距（用户截图实测约 55–60pt，取 44pt 保守值：
+// 按钮中心落在标题行偏下处，仍在标题行空白区内，不会盖住标题文字）。
+static const CGFloat kDYYYLiveBoardEntryTitleRowOffset = 44.0;
 // 标题在面板里居中，左侧空白 = 标题左缘在容器里的 x；要放得下左边距 +
 // 按钮宽 + 与标题的间距。2.2-9-86：最多往上走 5 层（-85 的 3 层在真机面板
 // 上不够，标题栏可能隔了更多中间容器）；高度也卡一道（30–120pt），
@@ -187,8 +278,14 @@ static UIView *DYYYLiveBoardEntryContainerForTitleLabel(UILabel *titleLabel, CGF
 // 用户不用找日志，截设置页图就能定位。只写这一条 defaults 键，
 // 不订阅任何通知、不弹任何提示。
 static NSString *const kDYYYLiveBoardEntryDiagKey = @"DYYYLiveBoardEntryDiag";
+// 2.2-9-89：诊断环。单条会被读诊断的动作本身覆盖（-87：榜单页触发；
+// -88：设置宿主 AWESettingBaseViewController 触发），改成最近 3 条环，
+// 最新一条在最前；设置页读诊断最多只能追加最新一条，面板打开那一刻的
+// 记录仍留在环里看得见。
+static NSString *const kDYYYLiveBoardEntryDiagRingKey = @"DYYYLiveBoardEntryDiagRing";
 
-// 把一条诊断写进 defaults（并返回带前缀的完整文案，供日志复用）。
+// 把一条诊断写进 defaults（单条键照常写一份兼容旧读法，环里再追加一条，
+// 最多 3 条、最新在前），并返回带前缀的完整文案，供日志复用。
 // 格式：HH:mm:ss <触发 VC 类名> <结果>；结果是 总开关关 / 找不到标题 /
 // 找不到容器(最后候选宽-高-左缘，需左缘) / 已装上 之一。
 static NSString *DYYYLiveBoardEntryRecordDiag(NSString *outcome, UIViewController *audienceVC) {
@@ -198,13 +295,43 @@ static NSString *DYYYLiveBoardEntryRecordDiag(NSString *outcome, UIViewControlle
     NSString *vcName = audienceVC ? NSStringFromClass(audienceVC.class) : @"(nil)";
     NSString *diag = [NSString stringWithFormat:@"%@ %@ %@", time, vcName, outcome];
     [NSUserDefaults.standardUserDefaults setObject:diag forKey:kDYYYLiveBoardEntryDiagKey];
+    NSArray *oldRing = [NSUserDefaults.standardUserDefaults arrayForKey:kDYYYLiveBoardEntryDiagRingKey];
+    NSMutableArray *ring = [NSMutableArray arrayWithObject:diag];
+    for (id item in oldRing ?: @[]) {
+        if (ring.count >= 3) break;
+        if ([item isKindOfClass:NSString.class]) [ring addObject:item];
+    }
+    [NSUserDefaults.standardUserDefaults setObject:ring forKey:kDYYYLiveBoardEntryDiagRingKey];
     return [NSString stringWithFormat:@"入口诊断：%@", diag];
 }
 
+// 2.2-9-89：读最近 3 条诊断（最新在前）+ watcher 心跳行，供榜单设置页
+// 页脚现读现显。心跳 10 秒内算活跃，否则只写上一跳时间与跳数；
+// 从来没有心跳，写“无心跳（未进直播间或 watcher 未启动）”。
 NSString *DYYYLiveBoardAudienceEntryDiagText(void) {
-    NSString *stored = [NSUserDefaults.standardUserDefaults stringForKey:kDYYYLiveBoardEntryDiagKey];
-    if (!stored.length) return @"入口诊断：暂无记录，请先打开一次在线观众面板再回来";
-    return [NSString stringWithFormat:@"入口诊断：%@", stored];
+    NSArray *ring = [NSUserDefaults.standardUserDefaults arrayForKey:kDYYYLiveBoardEntryDiagRingKey];
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    for (id item in ring ?: @[]) {
+        if ([item isKindOfClass:NSString.class]) [lines addObject:item];
+    }
+    if (!lines.count) {
+        NSString *stored = [NSUserDefaults.standardUserDefaults stringForKey:kDYYYLiveBoardEntryDiagKey];
+        if (stored.length) [lines addObject:stored];
+    }
+    NSString *beat = [NSUserDefaults.standardUserDefaults stringForKey:kDYYYLiveBoardEntryWatcherBeatKey];
+    NSTimeInterval beatAt = [NSUserDefaults.standardUserDefaults doubleForKey:kDYYYLiveBoardEntryWatcherBeatAtKey];
+    NSString *beatLine;
+    if (beat.length) {
+        NSTimeInterval age = [[NSDate date] timeIntervalSince1970] - beatAt;
+        if (beatAt > 0 && age < 10.0) beatLine = [NSString stringWithFormat:@"watcher：活跃，上一跳 %@", beat];
+        else beatLine = [NSString stringWithFormat:@"watcher：上一跳 %@（已停止/不在直播间）", beat];
+    } else {
+        beatLine = @"watcher：无心跳（未进直播间或 watcher 未启动）";
+    }
+    if (!lines.count) {
+        return [NSString stringWithFormat:@"入口诊断：暂无记录，请先打开一次在线观众面板再回来\n%@", beatLine];
+    }
+    return [NSString stringWithFormat:@"入口诊断：\n%@\n%@", [lines componentsJoinedByString:@"\n"], beatLine];
 }
 
 // 找不到标题时用：扫一棵子树，收集实际见到的 UILabel 文字（去重、
@@ -270,7 +397,7 @@ static void DYYYLiveBoardAudienceEntryInstallWithDiag(UIViewController *audience
     if (![DYYYLiveBoardStore.shared enabled]) {
         if (!recordDiag) return;
         NSString *diag = DYYYLiveBoardEntryRecordDiag(@"总开关关", audienceVC);
-        NSLog(@"[DYYY-88] AudienceEntry skip: board disabled — %@", diag);
+        NSLog(@"[DYYY-89] AudienceEntry skip: board disabled — %@", diag);
         return;
     }
     // 快路：上次装的按钮还在窗口里且真的可见，就不用再扫整棵树。
@@ -278,21 +405,26 @@ static void DYYYLiveBoardAudienceEntryInstallWithDiag(UIViewController *audience
     if (DYYYLiveBoardEntryButtonIsVisible(gInstalledEntryButton)) {
         if (recordDiag) {
             NSString *diag = DYYYLiveBoardEntryRecordDiag(@"已装上", audienceVC);
-            NSLog(@"[DYYY-88] AudienceEntry already installed — %@", diag);
+            NSLog(@"[DYYY-89] AudienceEntry already installed — %@", diag);
         }
         return;
     }
     gInstalledEntryButton = nil;
 
-    UILabel *titleLabel = DYYYLiveBoardFindAudienceTitleLabel(audienceVC.view);
+    // ① 标题路（首选）：在 room VC 子树、再不行各 window 里找“在线观众”。
+    UILabel *titleLabel = DYYYLiveBoardFindLabel(audienceVC.view, DYYYLiveBoardFindAudienceTitleLabel);
+    // ② 标题找不到时走 tab 锚点（2.2-9-89）：找“贡献榜/高等级”标签定位面板。
+    UILabel *tabLabel = nil;
+    UILabel *anchorLabel = titleLabel;
+    BOOL useTabAnchor = NO;
     if (!titleLabel) {
-        // 面板可能是单独呈现的 sheet，不在 room VC 子树里；再扫各 window。
-        for (UIWindow *window in UIApplication.sharedApplication.windows) {
-            titleLabel = DYYYLiveBoardFindAudienceTitleLabel(window);
-            if (titleLabel) break;
+        tabLabel = DYYYLiveBoardFindLabel(audienceVC.view, DYYYLiveBoardFindTabLabel);
+        if (tabLabel) {
+            anchorLabel = tabLabel;
+            useTabAnchor = YES;
         }
     }
-    if (!titleLabel) {
+    if (!anchorLabel) {
         // watcher 每跳：面板没开时本来就找不到，不记诊断（见 StartWatcher）。
         if (!recordDiag) return;
         // 2.2-9-87：标题没找到时，把实际见到的标题文字也记进诊断——
@@ -327,26 +459,38 @@ static void DYYYLiveBoardAudienceEntryInstallWithDiag(UIViewController *audience
                        (unsigned long)labelCount, topJoined];
         }
         NSString *diag = DYYYLiveBoardEntryRecordDiag(outcome, audienceVC);
-        NSLog(@"[DYYY-88] AudienceEntry skip: title label not found — %@", diag);
+        NSLog(@"[DYYY-89] AudienceEntry skip: title label not found — %@", diag);
         return;
     }
 
     UIButton *button = DYYYLiveBoardMakeEntryButton();
     CGFloat buttonWidth = button.intrinsicContentSize.width;
-    UIView *container = DYYYLiveBoardEntryContainerForTitleLabel(titleLabel, buttonWidth);
-    if (!container) {
-        CGFloat need = kDYYYLiveBoardAudienceEntryLeading + buttonWidth + kDYYYLiveBoardAudienceEntryGapToTitle;
-        NSString *outcome = [NSString stringWithFormat:@"找不到容器(最后候选 %.0f-%.0f-%.0f，需 %.0f)",
-                             gDYYYLiveBoardEntryLastCandidateWidth, gDYYYLiveBoardEntryLastCandidateHeight,
-                             gDYYYLiveBoardEntryLastCandidateLeftSpace, need];
-        NSString *diag = DYYYLiveBoardEntryRecordDiag(outcome, audienceVC);
-        NSLog(@"[DYYY-88] AudienceEntry skip: container not found — %@", diag);
-        return;
+    UIView *container = nil;
+    if (useTabAnchor) {
+        // tab 锚点：用 tab 行的容器作面板锚点，按钮放标题行左端。
+        container = DYYYLiveBoardEntryContainerForTabLabel(tabLabel);
+        if (!container) {
+            NSString *outcome = @"找不到容器(贡献榜锚点，需宽≥200/高30–200)";
+            NSString *diag = DYYYLiveBoardEntryRecordDiag(outcome, audienceVC);
+            NSLog(@"[DYYY-89] AudienceEntry skip: tab container not found — %@", diag);
+            return;
+        }
+    } else {
+        container = DYYYLiveBoardEntryContainerForTitleLabel(titleLabel, buttonWidth);
+        if (!container) {
+            CGFloat need = kDYYYLiveBoardAudienceEntryLeading + buttonWidth + kDYYYLiveBoardAudienceEntryGapToTitle;
+            NSString *outcome = [NSString stringWithFormat:@"找不到容器(最后候选 %.0f-%.0f-%.0f，需 %.0f)",
+                                 gDYYYLiveBoardEntryLastCandidateWidth, gDYYYLiveBoardEntryLastCandidateHeight,
+                                 gDYYYLiveBoardEntryLastCandidateLeftSpace, need];
+            NSString *diag = DYYYLiveBoardEntryRecordDiag(outcome, audienceVC);
+            NSLog(@"[DYYY-89] AudienceEntry skip: container not found — %@", diag);
+            return;
+        }
     }
     // 同一标题栏只加一次（面板重建时会换新容器，旧按钮随旧容器一起走）。
     if ([container viewWithTag:kDYYYLiveBoardAudienceEntryTag]) {
         NSString *diag = DYYYLiveBoardEntryRecordDiag(@"已装上", audienceVC);
-        NSLog(@"[DYYY-88] AudienceEntry already installed — %@", diag);
+        NSLog(@"[DYYY-89] AudienceEntry already installed — %@", diag);
         return;
     }
 
@@ -355,17 +499,27 @@ static void DYYYLiveBoardAudienceEntryInstallWithDiag(UIViewController *audience
     [button addTarget:target action:@selector(openBoard:) forControlEvents:UIControlEventTouchUpInside];
     objc_setAssociatedObject(button, @selector(openBoard:), target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [container addSubview:button];
-    // 只给按钮自己加约束：左贴标题栏、纵向与标题对齐、定高 26；
+    // 只给按钮自己加约束：左贴标题栏、定高 26；纵向：标题路与标题对齐，
+    // tab 路取 tab 中心往上一个标题行高（2.2-9-89，kDYYYLiveBoardEntryTitleRowOffset）。
     // 不改标题、不改标题栏、不碰任何原生 view 的 frame 或约束。
-    [NSLayoutConstraint activateConstraints:@[
-        [button.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:kDYYYLiveBoardAudienceEntryLeading],
-        [button.centerYAnchor constraintEqualToAnchor:titleLabel.centerYAnchor],
-        [button.heightAnchor constraintEqualToConstant:kDYYYLiveBoardAudienceEntryHeight],
-    ]];
+    if (useTabAnchor) {
+        [NSLayoutConstraint activateConstraints:@[
+            [button.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:kDYYYLiveBoardAudienceEntryLeading],
+            [button.centerYAnchor constraintEqualToAnchor:tabLabel.centerYAnchor constant:-kDYYYLiveBoardEntryTitleRowOffset],
+            [button.heightAnchor constraintEqualToConstant:kDYYYLiveBoardAudienceEntryHeight],
+        ]];
+    } else {
+        [NSLayoutConstraint activateConstraints:@[
+            [button.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:kDYYYLiveBoardAudienceEntryLeading],
+            [button.centerYAnchor constraintEqualToAnchor:titleLabel.centerYAnchor],
+            [button.heightAnchor constraintEqualToConstant:kDYYYLiveBoardAudienceEntryHeight],
+        ]];
+    }
     gInstalledEntryButton = button;
-    NSString *outcome = [NSString stringWithFormat:@"已装上(容器 %.0f×%.0f)",
+    NSString *outcome = [NSString stringWithFormat:@"已装上(%@ 容器 %.0f×%.0f)",
+                         useTabAnchor ? @"贡献榜锚点" : @"标题",
                          CGRectGetWidth(container.bounds), CGRectGetHeight(container.bounds)];
     NSString *diag = DYYYLiveBoardEntryRecordDiag(outcome, audienceVC);
-    NSLog(@"[DYYY-88] AudienceEntry added: container w=%.0f h=%.0f buttonW=%.0f — %@",
+    NSLog(@"[DYYY-89] AudienceEntry added: container w=%.0f h=%.0f buttonW=%.0f — %@",
           CGRectGetWidth(container.bounds), CGRectGetHeight(container.bounds), buttonWidth, diag);
 }
