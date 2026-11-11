@@ -4,6 +4,7 @@
 // 不另找没验证过的类。安装/拆除逻辑在 DYYYLiveBoardOverlay.m 里，这里只转发。
 // 安装是幂等的（root 上已有悬浮榜就不再新建），进出直播间多次也不会重复挂。
 #import "DYYYLiveBoardOverlay.h"
+#import "DYYYLiveBoardCapsule.h"
 #import "DYYYLiveBoardAudienceEntry.h"
 #import "DYYYLiveBoardLongPressEntry.h"
 #import "AwemeHeaders.h" // IESLiveAudienceViewController 的完整声明（view/isViewLoaded）
@@ -15,6 +16,7 @@
     __weak id weakResult = result;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         DYYYLiveBoardOverlayInstallFromContainer(weakResult);
+        DYYYLiveBoardCapsuleInstallFromContainer(weakResult);
     });
     return result;
 }
@@ -24,6 +26,7 @@
     __weak id weakResult = result;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         DYYYLiveBoardOverlayInstallFromContainer(weakResult);
+        DYYYLiveBoardCapsuleInstallFromContainer(weakResult);
     });
     return result;
 }
@@ -33,6 +36,7 @@
     __weak id weakResult = result;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         DYYYLiveBoardOverlayInstallFromContainer(weakResult);
+        DYYYLiveBoardCapsuleInstallFromContainer(weakResult);
     });
     return result;
 }
@@ -42,6 +46,7 @@
     __weak id weakResult = result;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         DYYYLiveBoardOverlayInstallFromContainer(weakResult);
+        DYYYLiveBoardCapsuleInstallFromContainer(weakResult);
     });
     return result;
 }
@@ -49,11 +54,13 @@
 - (void)setAudienceVC:(UIViewController *)audienceVC {
     %orig;
     DYYYLiveBoardOverlayInstallFromContainer(self);
+    DYYYLiveBoardCapsuleInstallFromContainer(self);
 }
 
 - (void)setRoomModel:(id)roomModel {
     %orig;
     DYYYLiveBoardOverlayInstallFromContainer(self);
+    DYYYLiveBoardCapsuleInstallFromContainer(self);
 }
 
 - (void)createAudienceViewController:(id)arg beginTime:(double)beginTime {
@@ -61,6 +68,7 @@
     __weak id weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         DYYYLiveBoardOverlayInstallFromContainer(weakSelf);
+        DYYYLiveBoardCapsuleInstallFromContainer(weakSelf);
     });
 }
 
@@ -69,6 +77,7 @@
     __weak id weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
         DYYYLiveBoardOverlayInstallFromContainer(weakSelf);
+        DYYYLiveBoardCapsuleInstallFromContainer(weakSelf);
     });
     return result;
 }
@@ -76,30 +85,36 @@
 - (void)updateWithRoomModel:(id)roomModel config:(id)config {
     %orig;
     DYYYLiveBoardOverlayInstallFromContainer(self);
+    DYYYLiveBoardCapsuleInstallFromContainer(self);
 }
 
 - (void)updateWithRoomModel:(id)roomModel context:(id)context {
     %orig;
     DYYYLiveBoardOverlayInstallFromContainer(self);
+    DYYYLiveBoardCapsuleInstallFromContainer(self);
 }
 
 - (void)updateWithRoomModel:(id)roomModel context:(id)context player:(id)player {
     %orig;
     DYYYLiveBoardOverlayInstallFromContainer(self);
+    DYYYLiveBoardCapsuleInstallFromContainer(self);
 }
 
 - (void)clearAudience {
     DYYYLiveBoardOverlayRemoveFromContainer(self);
+    DYYYLiveBoardCapsuleRemoveFromContainer(self);
     %orig;
 }
 
 - (void)prepareForReuse {
     DYYYLiveBoardOverlayRemoveFromContainer(self);
+    DYYYLiveBoardCapsuleRemoveFromContainer(self);
     %orig;
 }
 
 - (void)dealloc {
     DYYYLiveBoardOverlayRemoveFromContainer(self);
+    DYYYLiveBoardCapsuleRemoveFromContainer(self);
     %orig;
 }
 
@@ -112,6 +127,7 @@
     __weak id weakResult = result;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         DYYYLiveBoardOverlayInstallFromAudienceWrapper(weakResult);
+        DYYYLiveBoardCapsuleInstallFromAudienceWrapper(weakResult);
     });
     return result;
 }
@@ -119,25 +135,30 @@
 - (void)setRoomModel:(id)roomModel {
     %orig;
     DYYYLiveBoardOverlayInstallFromAudienceWrapper(self);
+    DYYYLiveBoardCapsuleInstallFromAudienceWrapper(self);
 }
 
 - (void)setAudienceViewController:(UIViewController *)audienceViewController {
     %orig;
     DYYYLiveBoardOverlayInstallFromAudienceWrapper(self);
+    DYYYLiveBoardCapsuleInstallFromAudienceWrapper(self);
 }
 
 - (void)attachAudienceViewControllerDelegate:(id)delegate {
     %orig;
     DYYYLiveBoardOverlayInstallFromAudienceWrapper(self);
+    DYYYLiveBoardCapsuleInstallFromAudienceWrapper(self);
 }
 
 - (void)exitLiveRoomWithType:(unsigned long long)type {
     DYYYLiveBoardOverlayRemoveFromAudienceWrapper(self);
+    DYYYLiveBoardCapsuleRemoveFromAudienceWrapper(self);
     %orig;
 }
 
 - (void)dealloc {
     DYYYLiveBoardOverlayRemoveFromAudienceWrapper(self);
+    DYYYLiveBoardCapsuleRemoveFromAudienceWrapper(self);
     %orig;
 }
 
@@ -152,25 +173,30 @@
 - (void)setItemModel:(id)itemModel {
     %orig;
     DYYYLiveBoardOverlayInstallFromInnerFeedCell(self);
+    DYYYLiveBoardCapsuleInstallFromInnerFeedCell(self);
 }
 
 - (void)setRoomAisle:(id)roomAisle {
     %orig;
     DYYYLiveBoardOverlayInstallFromInnerFeedCell(self);
+    DYYYLiveBoardCapsuleInstallFromInnerFeedCell(self);
 }
 
 - (void)setAudienceVC:(UIViewController *)audienceVC {
     %orig;
     DYYYLiveBoardOverlayInstallFromInnerFeedCell(self);
+    DYYYLiveBoardCapsuleInstallFromInnerFeedCell(self);
 }
 
 - (void)updateWithItemModel:(id)itemModel {
     %orig;
     DYYYLiveBoardOverlayInstallFromInnerFeedCell(self);
+    DYYYLiveBoardCapsuleInstallFromInnerFeedCell(self);
 }
 
 - (void)prepareForReuse {
     DYYYLiveBoardOverlayRemoveFromInnerFeedCell(self);
+    DYYYLiveBoardCapsuleRemoveFromInnerFeedCell(self);
     %orig;
 }
 
@@ -181,17 +207,20 @@
 - (void)viewDidLoad {
     %orig;
     DYYYLiveBoardOverlayInstallOnView(self.view);
+    DYYYLiveBoardCapsuleInstallOnView(self.view);
     DYYYLiveBoardAudienceEntryInstall(self);
     __weak id weakSelf = self;
     // 房间自己的 view 陆续加上来可能盖住悬浮榜，0.35 秒后再装一次置顶。
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (weakSelf) DYYYLiveBoardOverlayInstallOnView([weakSelf view]);
+        if (weakSelf) DYYYLiveBoardCapsuleInstallOnView([weakSelf view]);
     });
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
     DYYYLiveBoardOverlayInstallOnView(self.view);
+    DYYYLiveBoardCapsuleInstallOnView(self.view);
     DYYYLiveBoardAudienceEntryInstall(self);
 }
 
@@ -224,6 +253,7 @@
 - (void)didEnterRoom:(id)room {
     %orig;
     DYYYLiveBoardOverlayInstallOnView(self.view);
+    DYYYLiveBoardCapsuleInstallOnView(self.view);
     DYYYLiveBoardAudienceEntryInstall(self);
     DYYYLiveBoardAudienceEntryStartWatcher(self);
 }
@@ -231,12 +261,14 @@
 - (void)didPreloadRoom:(id)room {
     %orig;
     DYYYLiveBoardOverlayInstallOnView(self.view);
+    DYYYLiveBoardCapsuleInstallOnView(self.view);
     DYYYLiveBoardAudienceEntryInstall(self);
 }
 
 - (void)didCloseRoom:(id)room closeType:(unsigned long long)type {
     DYYYLiveBoardAudienceEntryStopWatcher();
     DYYYLiveBoardOverlayRemoveFromView(self.view);
+    DYYYLiveBoardCapsuleRemoveFromView(self.view);
     %orig;
 }
 
@@ -244,6 +276,7 @@
     DYYYLiveBoardAudienceEntryStopWatcher();
     if (self.isViewLoaded) {
         DYYYLiveBoardOverlayRemoveFromView(self.view);
+        DYYYLiveBoardCapsuleRemoveFromView(self.view);
     }
     %orig;
 }
