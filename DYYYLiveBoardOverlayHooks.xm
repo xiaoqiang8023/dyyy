@@ -202,6 +202,7 @@
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     DYYYLiveBoardAudienceEntryInstall(self);
+    DYYYLiveBoardAudienceEntryStartWatcher(self);
     __weak IESLiveAudienceViewController *weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         IESLiveAudienceViewController *strongSelf = weakSelf;
@@ -223,6 +224,7 @@
     %orig;
     DYYYLiveBoardOverlayInstallOnView(self.view);
     DYYYLiveBoardAudienceEntryInstall(self);
+    DYYYLiveBoardAudienceEntryStartWatcher(self);
 }
 
 - (void)didPreloadRoom:(id)room {
@@ -232,11 +234,13 @@
 }
 
 - (void)didCloseRoom:(id)room closeType:(unsigned long long)type {
+    DYYYLiveBoardAudienceEntryStopWatcher();
     DYYYLiveBoardOverlayRemoveFromView(self.view);
     %orig;
 }
 
 - (void)dealloc {
+    DYYYLiveBoardAudienceEntryStopWatcher();
     if (self.isViewLoaded) {
         DYYYLiveBoardOverlayRemoveFromView(self.view);
     }
@@ -254,11 +258,17 @@
 // 非空才算 sheet，Feed 里正常 push 的页面不扫）；② 任何 present 完成
 // 后，对被呈现的 VC 和自己各试一次。先 %orig 再装，不改原生 frame，
 // 不碰 layoutSubviews，不订阅通知。Install 自身幂等，多调无害。
+// 2.2-9-88：① 进房间后另有 1 秒轮询 watcher（见 IESLiveAudienceViewController
+// 的 viewDidAppear/didEnterRoom 启动、didCloseRoom/dealloc 停止），面板
+// 无论何时出现/重建都能装上；② 下面两钩都跳过自家 DYYY 页面触发，诊断
+// 不再被榜单页自己覆盖；③ Install 的快路只认可见的已装按钮。
 %hook UIViewController
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    if (self.presentingViewController) {
+    // 2.2-9-88：自家榜单/设置页出现时跳过——-87 的诊断就是被自家榜单页
+    // 的 viewDidAppear 触发覆盖掉的（诊断里触发 VC 是 DYYYLiveBoardViewController）。
+    if (!DYYYLiveBoardAudienceEntryIsOwnViewController(self) && self.presentingViewController) {
         DYYYLiveBoardAudienceEntryInstall(self);
     }
 }
@@ -270,8 +280,10 @@
         if (completion) completion();
         UIViewController *strongSelf = weakSelf;
         UIViewController *strongPresented = weakPresented;
-        if (strongPresented) DYYYLiveBoardAudienceEntryInstall(strongPresented);
-        if (strongSelf) DYYYLiveBoardAudienceEntryInstall(strongSelf);
+        // 2.2-9-88：任一端是我们自家页面（比如设置页弹出榜单页）时都跳过，
+        // 观众面板不可能在那次呈现里，装了只会拿榜单页自己的标题覆盖诊断。
+        if (strongPresented && !DYYYLiveBoardAudienceEntryIsOwnViewController(strongPresented)) DYYYLiveBoardAudienceEntryInstall(strongPresented);
+        if (strongSelf && !DYYYLiveBoardAudienceEntryIsOwnViewController(strongSelf)) DYYYLiveBoardAudienceEntryInstall(strongSelf);
     };
     %orig(viewControllerToPresent, flag, wrappedCompletion);
 }
