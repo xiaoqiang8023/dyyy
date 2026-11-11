@@ -62,11 +62,14 @@ static __weak UIButton *gInstalledEntryButton = nil;
 // 在一棵子树里找文字是“在线观众”的 UILabel（标题栏的标题）。
 // 不要求可见：面板可能是预建好藏着的，按钮装进它自己的容器里，
 // 面板藏着按钮跟着藏、面板出来按钮跟着出来，没有副作用。
+// 2.2-9-86：标题也可能只写在 attributedText 里（label.text 为空时
+// 读 attributedText.string 兜底）。
 static UILabel *DYYYLiveBoardFindAudienceTitleLabel(UIView *view) {
     if (!view) return nil;
     if ([view isKindOfClass:UILabel.class]) {
         UILabel *label = (UILabel *)view;
         if ([label.text isEqualToString:@"在线观众"]) return label;
+        if (label.text.length == 0 && [label.attributedText.string isEqualToString:@"在线观众"]) return label;
     }
     for (UIView *sub in view.subviews) {
         UILabel *found = DYYYLiveBoardFindAudienceTitleLabel(sub);
@@ -77,13 +80,21 @@ static UILabel *DYYYLiveBoardFindAudienceTitleLabel(UIView *view) {
 
 // 从标题 label 往上找标题栏：第一层足够宽、且标题左缘留得出入口位置的祖先。
 // 标题在面板里居中，左侧空白 = 标题左缘在容器里的 x；要放得下左边距 +
-// 按钮宽 + 与标题的间距。最多往上走 3 层；高度也卡一道（30–120pt），
+// 按钮宽 + 与标题的间距。2.2-9-86：最多往上走 5 层（-85 的 3 层在真机面板
+// 上不够，标题栏可能隔了更多中间容器）；高度也卡一道（30–120pt），
 // 防止一路走到房间根视图（整屏高）上——按钮不能挂在房间根视图上，
 // 否则面板关了它还留在屏幕上。
 // 找不到合适的容器返回 nil（调用方静默跳过，不强行贴上去盖住标题）。
+// 诊断用：记下最后一个合宽高但左缘不够的候选容器，供 [DYYY-86] 日志用。
+static CGFloat gDYYYLiveBoardEntryLastCandidateWidth = 0;
+static CGFloat gDYYYLiveBoardEntryLastCandidateHeight = 0;
+static CGFloat gDYYYLiveBoardEntryLastCandidateLeftSpace = 0;
 static UIView *DYYYLiveBoardEntryContainerForTitleLabel(UILabel *titleLabel, CGFloat buttonWidth) {
+    gDYYYLiveBoardEntryLastCandidateWidth = 0;
+    gDYYYLiveBoardEntryLastCandidateHeight = 0;
+    gDYYYLiveBoardEntryLastCandidateLeftSpace = 0;
     UIView *candidate = titleLabel.superview;
-    for (NSInteger level = 0; level < 3 && candidate; level++) {
+    for (NSInteger level = 0; level < 5 && candidate; level++) {
         CGFloat containerWidth = CGRectGetWidth(candidate.bounds);
         CGFloat containerHeight = CGRectGetHeight(candidate.bounds);
         if (containerWidth >= 200.0 && containerHeight >= 30.0 && containerHeight <= 120.0) {
@@ -92,6 +103,9 @@ static UIView *DYYYLiveBoardEntryContainerForTitleLabel(UILabel *titleLabel, CGF
             if (leftSpace >= kDYYYLiveBoardAudienceEntryLeading + buttonWidth + kDYYYLiveBoardAudienceEntryGapToTitle) {
                 return candidate;
             }
+            gDYYYLiveBoardEntryLastCandidateWidth = containerWidth;
+            gDYYYLiveBoardEntryLastCandidateHeight = containerHeight;
+            gDYYYLiveBoardEntryLastCandidateLeftSpace = leftSpace;
         }
         candidate = candidate.superview;
     }
@@ -119,7 +133,10 @@ void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC) {
         return;
     }
     // 门控：人气榜总开关关着时不显示入口（榜单页本身也没数据）。
-    if (![DYYYLiveBoardStore.shared enabled]) return;
+    if (![DYYYLiveBoardStore.shared enabled]) {
+        NSLog(@"[DYYY-86] AudienceEntry skip: board disabled");
+        return;
+    }
     // 快路：上次装的按钮还在窗口里，就不用再扫整棵树。
     if (gInstalledEntryButton && gInstalledEntryButton.window) return;
     if (!audienceVC) return;
@@ -132,12 +149,21 @@ void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC) {
             if (titleLabel) break;
         }
     }
-    if (!titleLabel) return;
+    if (!titleLabel) {
+        NSLog(@"[DYYY-86] AudienceEntry skip: title label not found");
+        return;
+    }
 
     UIButton *button = DYYYLiveBoardMakeEntryButton();
     CGFloat buttonWidth = button.intrinsicContentSize.width;
     UIView *container = DYYYLiveBoardEntryContainerForTitleLabel(titleLabel, buttonWidth);
-    if (!container) return;
+    if (!container) {
+        NSLog(@"[DYYY-86] AudienceEntry skip: container not found (last candidate w=%.0f h=%.0f leftSpace=%.0f, need %.0f)",
+              gDYYYLiveBoardEntryLastCandidateWidth, gDYYYLiveBoardEntryLastCandidateHeight,
+              gDYYYLiveBoardEntryLastCandidateLeftSpace,
+              kDYYYLiveBoardAudienceEntryLeading + buttonWidth + kDYYYLiveBoardAudienceEntryGapToTitle);
+        return;
+    }
     // 同一标题栏只加一次（面板重建时会换新容器，旧按钮随旧容器一起走）。
     if ([container viewWithTag:kDYYYLiveBoardAudienceEntryTag]) return;
 
@@ -154,4 +180,6 @@ void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC) {
         [button.heightAnchor constraintEqualToConstant:kDYYYLiveBoardAudienceEntryHeight],
     ]];
     gInstalledEntryButton = button;
+    NSLog(@"[DYYY-86] AudienceEntry added: container w=%.0f h=%.0f buttonW=%.0f",
+          CGRectGetWidth(container.bounds), CGRectGetHeight(container.bounds), buttonWidth);
 }
