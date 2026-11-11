@@ -3,7 +3,8 @@
 // 面板标题栏左侧的空白处，点一下打开榜单页。
 // 安装点在 DYYYLiveBoardOverlayHooks.xm（IESLiveAudienceViewController 的
 // 生命周期 + presentViewController 完成回调，2.2-9-86 起另有 UIViewController
-// 的 viewDidAppear/presentViewController 两钩——面板真正出现时才触发），
+// 的 viewDidAppear/presentViewController 两钩——面板真正出现时才触发，
+// 2.2-9-88 起进房间后另有 1 秒轮询 watcher——面板无论何时出现/重建都能装上），
 // 逻辑全在这里，不另起 .xm。
 #import <UIKit/UIKit.h>
 
@@ -21,6 +22,18 @@ extern "C" {
 // 2.2-9-87：每次安装尝试都把结果写进 NSUserDefaults（DYYYLiveBoardEntryDiag），
 // 榜单设置页第 0 组页脚现读现显——用户不用找日志，截设置页图就能定位。
 void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC);
+
+// 2.2-9-88：判断一个 VC 是不是我们自家的页面（榜单页/设置页，类名以 DYYY
+// 开头）。观众面板永远不在自家页面里，Install 与诊断都必须跳过这类触发
+// VC——-87 的诊断就是被自家榜单页的 viewDidAppear 触发覆盖掉的。
+BOOL DYYYLiveBoardAudienceEntryIsOwnViewController(UIViewController *vc);
+
+// 2.2-9-88：进房间后每秒重试安装的 watcher。进房间（viewDidAppear /
+// didEnterRoom）时启动，出房间（didCloseRoom / dealloc）时停止；每跳只
+// 调 Install，Install 自身幂等、按钮已在窗口里可见时快路返回，所以每跳
+// 很便宜。面板无论何时出现/重建都能被装上，不依赖呈现方式。
+void DYYYLiveBoardAudienceEntryStartWatcher(UIViewController *roomVC);
+void DYYYLiveBoardAudienceEntryStopWatcher(void);
 
 // 2.2-9-87：读最近一次安装尝试的诊断（已带“入口诊断：”前缀；
 // 无记录时返回“入口诊断：暂无记录，请先打开一次在线观众面板再回来”）。
