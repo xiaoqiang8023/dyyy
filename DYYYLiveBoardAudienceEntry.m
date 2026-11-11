@@ -3,7 +3,8 @@
 // ② 点按钮打开榜单页（包一层导航控制器 modal 全屏呈现，带“关闭”按钮）。
 // 硬约束：不改任何原生 view 的 frame，不在 layoutSubviews 里做任何事，
 // 不订阅任何通知；按钮只用自己的 Auto Layout 约束定位；找不到标题栏时
-// 静默返回，不弹提示、不写 defaults。
+// 静默返回，不弹提示；2.2-9-87 起每次尝试都把结果写进一条诊断 defaults
+//（DYYYLiveBoardEntryDiag），供榜单设置页页脚现读现显。
 #import "DYYYLiveBoardAudienceEntry.h"
 #import "DYYYLiveBoardStore.h"
 #import "DYYYLiveBoardUI.h"
@@ -85,7 +86,7 @@ static UILabel *DYYYLiveBoardFindAudienceTitleLabel(UIView *view) {
 // 防止一路走到房间根视图（整屏高）上——按钮不能挂在房间根视图上，
 // 否则面板关了它还留在屏幕上。
 // 找不到合适的容器返回 nil（调用方静默跳过，不强行贴上去盖住标题）。
-// 诊断用：记下最后一个合宽高但左缘不够的候选容器，供 [DYYY-86] 日志用。
+// 诊断用：记下最后一个合宽高但左缘不够的候选容器，供 [DYYY-87] 日志与诊断用。
 static CGFloat gDYYYLiveBoardEntryLastCandidateWidth = 0;
 static CGFloat gDYYYLiveBoardEntryLastCandidateHeight = 0;
 static CGFloat gDYYYLiveBoardEntryLastCandidateLeftSpace = 0;
@@ -112,6 +113,51 @@ static UIView *DYYYLiveBoardEntryContainerForTitleLabel(UILabel *titleLabel, CGF
     return nil;
 }
 
+// 2.2-9-87：安装诊断。每次 Install 尝试都把结果写进 NSUserDefaults
+//（单条短字符串，每次覆盖），榜单设置页第 0 组页脚现读现显——
+// 用户不用找日志，截设置页图就能定位。只写这一条 defaults 键，
+// 不订阅任何通知、不弹任何提示。
+static NSString *const kDYYYLiveBoardEntryDiagKey = @"DYYYLiveBoardEntryDiag";
+
+// 把一条诊断写进 defaults（并返回带前缀的完整文案，供日志复用）。
+// 格式：HH:mm:ss <触发 VC 类名> <结果>；结果是 总开关关 / 找不到标题 /
+// 找不到容器(最后候选宽-高-左缘，需左缘) / 已装上 之一。
+static NSString *DYYYLiveBoardEntryRecordDiag(NSString *outcome, UIViewController *audienceVC) {
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateFormat = @"HH:mm:ss";
+    NSString *time = [formatter stringFromDate:[NSDate date]];
+    NSString *vcName = audienceVC ? NSStringFromClass(audienceVC.class) : @"(nil)";
+    NSString *diag = [NSString stringWithFormat:@"%@ %@ %@", time, vcName, outcome];
+    [NSUserDefaults.standardUserDefaults setObject:diag forKey:kDYYYLiveBoardEntryDiagKey];
+    return [NSString stringWithFormat:@"入口诊断：%@", diag];
+}
+
+NSString *DYYYLiveBoardAudienceEntryDiagText(void) {
+    NSString *stored = [NSUserDefaults.standardUserDefaults stringForKey:kDYYYLiveBoardEntryDiagKey];
+    if (!stored.length) return @"入口诊断：暂无记录，请先打开一次在线观众面板再回来";
+    return [NSString stringWithFormat:@"入口诊断：%@", stored];
+}
+
+// 找不到标题时用：扫一棵子树，收集实际见到的 UILabel 文字（去重、
+// 去空白、每条截 12 字、最多 cap 条），供诊断判断标题是拼写不同
+//（多了空格/换了词）还是根本不是 UILabel。
+static void DYYYLiveBoardCollectLabelTexts(UIView *view, NSMutableArray<NSString *> *out, NSUInteger cap) {
+    if (!view || out.count >= cap) return;
+    if ([view isKindOfClass:UILabel.class]) {
+        UILabel *label = (UILabel *)view;
+        NSString *text = label.text.length ? label.text : label.attributedText.string;
+        NSString *trimmed = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (trimmed.length > 0 && ![trimmed isEqualToString:@"人气榜"] && ![out containsObject:trimmed]) {
+            if (trimmed.length > 12) trimmed = [trimmed substringToIndex:12];
+            [out addObject:trimmed];
+        }
+    }
+    for (UIView *sub in view.subviews) {
+        if (out.count >= cap) break;
+        DYYYLiveBoardCollectLabelTexts(sub, out, cap);
+    }
+}
+
 static UIButton *DYYYLiveBoardMakeEntryButton(void) {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
     button.tag = kDYYYLiveBoardAudienceEntryTag;
@@ -134,11 +180,16 @@ void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC) {
     }
     // 门控：人气榜总开关关着时不显示入口（榜单页本身也没数据）。
     if (![DYYYLiveBoardStore.shared enabled]) {
-        NSLog(@"[DYYY-86] AudienceEntry skip: board disabled");
+        NSString *diag = DYYYLiveBoardEntryRecordDiag(@"总开关关", audienceVC);
+        NSLog(@"[DYYY-87] AudienceEntry skip: board disabled — %@", diag);
         return;
     }
     // 快路：上次装的按钮还在窗口里，就不用再扫整棵树。
-    if (gInstalledEntryButton && gInstalledEntryButton.window) return;
+    if (gInstalledEntryButton && gInstalledEntryButton.window) {
+        NSString *diag = DYYYLiveBoardEntryRecordDiag(@"已装上", audienceVC);
+        NSLog(@"[DYYY-87] AudienceEntry already installed — %@", diag);
+        return;
+    }
     if (!audienceVC) return;
 
     UILabel *titleLabel = DYYYLiveBoardFindAudienceTitleLabel(audienceVC.view);
@@ -150,7 +201,22 @@ void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC) {
         }
     }
     if (!titleLabel) {
-        NSLog(@"[DYYY-86] AudienceEntry skip: title label not found");
+        // 2.2-9-87：标题没找到时，把实际见到的标题文字也记进诊断——
+        // 能分清是标题拼写不同、还是根本不是 UILabel、还是面板压根没被扫到。
+        NSMutableArray<NSString *> *seen = [NSMutableArray array];
+        DYYYLiveBoardCollectLabelTexts(audienceVC.view, seen, 12);
+        for (UIWindow *window in UIApplication.sharedApplication.windows) {
+            if (seen.count >= 12) break;
+            DYYYLiveBoardCollectLabelTexts(window, seen, 12);
+        }
+        NSString *outcome;
+        if (seen.count) {
+            outcome = [NSString stringWithFormat:@"找不到标题 | 已见标题:%@", [[seen subarrayWithRange:NSMakeRange(0, MIN(8, (NSInteger)seen.count))] componentsJoinedByString:@","]];
+        } else {
+            outcome = @"找不到标题 | 未见任何标题文字";
+        }
+        NSString *diag = DYYYLiveBoardEntryRecordDiag(outcome, audienceVC);
+        NSLog(@"[DYYY-87] AudienceEntry skip: title label not found — %@", diag);
         return;
     }
 
@@ -158,14 +224,20 @@ void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC) {
     CGFloat buttonWidth = button.intrinsicContentSize.width;
     UIView *container = DYYYLiveBoardEntryContainerForTitleLabel(titleLabel, buttonWidth);
     if (!container) {
-        NSLog(@"[DYYY-86] AudienceEntry skip: container not found (last candidate w=%.0f h=%.0f leftSpace=%.0f, need %.0f)",
-              gDYYYLiveBoardEntryLastCandidateWidth, gDYYYLiveBoardEntryLastCandidateHeight,
-              gDYYYLiveBoardEntryLastCandidateLeftSpace,
-              kDYYYLiveBoardAudienceEntryLeading + buttonWidth + kDYYYLiveBoardAudienceEntryGapToTitle);
+        CGFloat need = kDYYYLiveBoardAudienceEntryLeading + buttonWidth + kDYYYLiveBoardAudienceEntryGapToTitle;
+        NSString *outcome = [NSString stringWithFormat:@"找不到容器(最后候选 %.0f-%.0f-%.0f，需 %.0f)",
+                             gDYYYLiveBoardEntryLastCandidateWidth, gDYYYLiveBoardEntryLastCandidateHeight,
+                             gDYYYLiveBoardEntryLastCandidateLeftSpace, need];
+        NSString *diag = DYYYLiveBoardEntryRecordDiag(outcome, audienceVC);
+        NSLog(@"[DYYY-87] AudienceEntry skip: container not found — %@", diag);
         return;
     }
     // 同一标题栏只加一次（面板重建时会换新容器，旧按钮随旧容器一起走）。
-    if ([container viewWithTag:kDYYYLiveBoardAudienceEntryTag]) return;
+    if ([container viewWithTag:kDYYYLiveBoardAudienceEntryTag]) {
+        NSString *diag = DYYYLiveBoardEntryRecordDiag(@"已装上", audienceVC);
+        NSLog(@"[DYYY-87] AudienceEntry already installed — %@", diag);
+        return;
+    }
 
     DYYYLiveBoardAudienceEntryTarget *target = [[DYYYLiveBoardAudienceEntryTarget alloc] init];
     target.audienceVC = audienceVC;
@@ -180,6 +252,9 @@ void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC) {
         [button.heightAnchor constraintEqualToConstant:kDYYYLiveBoardAudienceEntryHeight],
     ]];
     gInstalledEntryButton = button;
-    NSLog(@"[DYYY-86] AudienceEntry added: container w=%.0f h=%.0f buttonW=%.0f",
-          CGRectGetWidth(container.bounds), CGRectGetHeight(container.bounds), buttonWidth);
+    NSString *outcome = [NSString stringWithFormat:@"已装上(容器 %.0f×%.0f)",
+                         CGRectGetWidth(container.bounds), CGRectGetHeight(container.bounds)];
+    NSString *diag = DYYYLiveBoardEntryRecordDiag(outcome, audienceVC);
+    NSLog(@"[DYYY-87] AudienceEntry added: container w=%.0f h=%.0f buttonW=%.0f — %@",
+          CGRectGetWidth(container.bounds), CGRectGetHeight(container.bounds), buttonWidth, diag);
 }
