@@ -244,3 +244,36 @@
 }
 
 %end
+
+// 2.2-9-86：修 -85 真机入口没出现。-85 的 Install 只挂在
+// IESLiveAudienceViewController 的生命周期上，而它是在播房间的 VC
+// 本身、不是“在线观众”那张 sheet；面板若由别的 VC 呈现、或挂在
+// sheet 管理器下，面板真正出现时没有任何 -85 触发点会跑。
+// 补两条在面板真正出现时才跑的触发点（只做这一件，其他不动）：
+// ① 任何被呈现出来的 VC 在 viewDidAppear 时试一次（presentingViewController
+// 非空才算 sheet，Feed 里正常 push 的页面不扫）；② 任何 present 完成
+// 后，对被呈现的 VC 和自己各试一次。先 %orig 再装，不改原生 frame，
+// 不碰 layoutSubviews，不订阅通知。Install 自身幂等，多调无害。
+%hook UIViewController
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if (self.presentingViewController) {
+        DYYYLiveBoardAudienceEntryInstall(self);
+    }
+}
+
+- (void)presentViewController:(UIViewController *)viewControllerToPresent animated:(BOOL)flag completion:(void (^)(void))completion {
+    __weak UIViewController *weakSelf = self;
+    __weak UIViewController *weakPresented = viewControllerToPresent;
+    void (^wrappedCompletion)(void) = ^{
+        if (completion) completion();
+        UIViewController *strongSelf = weakSelf;
+        UIViewController *strongPresented = weakPresented;
+        if (strongPresented) DYYYLiveBoardAudienceEntryInstall(strongPresented);
+        if (strongSelf) DYYYLiveBoardAudienceEntryInstall(strongSelf);
+    };
+    %orig(viewControllerToPresent, flag, wrappedCompletion);
+}
+
+%end
