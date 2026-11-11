@@ -23,9 +23,11 @@ extern "C" {
 // 榜单设置页第 0 组页脚现读现显——用户不用找日志，截设置页图就能定位。
 void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC);
 
-// 2.2-9-88：判断一个 VC 是不是我们自家的页面（榜单页/设置页，类名以 DYYY
-// 开头）。观众面板永远不在自家页面里，Install 与诊断都必须跳过这类触发
-// VC——-87 的诊断就是被自家榜单页的 viewDidAppear 触发覆盖掉的。
+// 2.2-9-89：判断一个 VC 是不是我们自家页面或设置宿主（榜单页/设置页，
+// 类名以 DYYY 开头，或类名含 "Setting"——抖音设置宿主
+// AWESettingBaseViewController 在 -88 漏网）。观众面板永远不在这类页面
+// 里，Install 与诊断都必须跳过这类触发 VC——-88 的诊断就是被用户打开
+// 设置读诊断时 AWESettingBaseViewController 的触发覆盖掉的。
 BOOL DYYYLiveBoardAudienceEntryIsOwnViewController(UIViewController *vc);
 
 // 2.2-9-88：进房间后每秒重试安装的 watcher。进房间（viewDidAppear /
@@ -35,8 +37,8 @@ BOOL DYYYLiveBoardAudienceEntryIsOwnViewController(UIViewController *vc);
 void DYYYLiveBoardAudienceEntryStartWatcher(UIViewController *roomVC);
 void DYYYLiveBoardAudienceEntryStopWatcher(void);
 
-// 2.2-9-87：读最近一次安装尝试的诊断（已带“入口诊断：”前缀；
-// 无记录时返回“入口诊断：暂无记录，请先打开一次在线观众面板再回来”）。
+// 2.2-9-87：读最近 3 条安装尝试的诊断（最新在前）+ watcher 心跳行
+//（2.2-9-89：环 + 心跳；无记录时返回“入口诊断：暂无记录……”）。
 // 供榜单设置页页脚现读现显。
 NSString *DYYYLiveBoardAudienceEntryDiagText(void);
 
