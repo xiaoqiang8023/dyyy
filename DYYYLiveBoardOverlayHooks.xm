@@ -5,6 +5,7 @@
 // 安装是幂等的（root 上已有悬浮榜就不再新建），进出直播间多次也不会重复挂。
 #import "DYYYLiveBoardOverlay.h"
 #import "DYYYLiveBoardAudienceEntry.h"
+#import "DYYYLiveBoardLongPressEntry.h"
 #import "AwemeHeaders.h" // IESLiveAudienceViewController 的完整声明（view/isViewLoaded）
 
 %hook AWELiveAudienceContainerController
@@ -270,6 +271,8 @@
     // 的 viewDidAppear 触发覆盖掉的（诊断里触发 VC 是 DYYYLiveBoardViewController）。
     if (!DYYYLiveBoardAudienceEntryIsOwnViewController(self) && self.presentingViewController) {
         DYYYLiveBoardAudienceEntryInstall(self);
+        // 2.2-9-90：长按菜单入口同款触发——菜单出现时也装一次。
+        DYYYLiveBoardLongPressEntryInstall(self);
     }
 }
 
@@ -282,8 +285,8 @@
         UIViewController *strongPresented = weakPresented;
         // 2.2-9-88：任一端是我们自家页面（比如设置页弹出榜单页）时都跳过，
         // 观众面板不可能在那次呈现里，装了只会拿榜单页自己的标题覆盖诊断。
-        if (strongPresented && !DYYYLiveBoardAudienceEntryIsOwnViewController(strongPresented)) DYYYLiveBoardAudienceEntryInstall(strongPresented);
-        if (strongSelf && !DYYYLiveBoardAudienceEntryIsOwnViewController(strongSelf)) DYYYLiveBoardAudienceEntryInstall(strongSelf);
+        if (strongPresented && !DYYYLiveBoardAudienceEntryIsOwnViewController(strongPresented)) { DYYYLiveBoardAudienceEntryInstall(strongPresented); DYYYLiveBoardLongPressEntryInstall(strongPresented); }
+        if (strongSelf && !DYYYLiveBoardAudienceEntryIsOwnViewController(strongSelf)) { DYYYLiveBoardAudienceEntryInstall(strongSelf); DYYYLiveBoardLongPressEntryInstall(strongSelf); }
     };
     %orig(viewControllerToPresent, flag, wrappedCompletion);
 }
