@@ -1,0 +1,9 @@
+# Build outputs
+packages/
+.theos/
+*.deb
+*.ipa
+*.dSYM/
+obj/
+# macOS
+.DS_Store
