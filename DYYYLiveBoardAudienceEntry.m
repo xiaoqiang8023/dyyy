@@ -17,9 +17,14 @@
 // ④ 找不到“在线观众”标题时，改用面板 tab 标签“贡献榜/高等级”作第二
 // 锚点定位面板、把按钮放到标题行左端。
 #import "DYYYLiveBoardAudienceEntry.h"
+#import "DYYYLiveBoardLongPressEntry.h"
 #import "DYYYLiveBoardStore.h"
 #import "DYYYLiveBoardUI.h"
 #import <objc/runtime.h>
+
+// 前向声明（2.2-9-90：定义在文件后半部分，供 AudienceEntryTarget.openBoard
+// 与长按菜单入口共用）。
+void DYYYLiveBoardPresentBoardFromViewController(UIViewController *from);
 
 static const NSInteger kDYYYLiveBoardAudienceEntryTag = 987601;
 static const CGFloat kDYYYLiveBoardAudienceEntryHeight = 26.0;
@@ -113,6 +118,9 @@ void DYYYLiveBoardAudienceEntryStartWatcher(UIViewController *roomVC) {
         // 写了会把面板打开那一刻的真实诊断冲掉；只有找到标题（面板在场）
         // 或已装上时才记，见 InstallWithDiag 的 recordDiag 分支。
         DYYYLiveBoardAudienceEntryInstallWithDiag(room, NO);
+        // 2.2-9-90：长按菜单入口同款 backstop——菜单无论何时出现/重建都
+        // 能装上（recordDiag=NO，找不到锚点时不写诊断）。
+        DYYYLiveBoardLongPressEntryInstallWithDiag(room, NO);
     }];
     [NSRunLoop.mainRunLoop addTimer:gDYYYLiveBoardEntryWatcherTimer forMode:NSRunLoopCommonModes];
 }
@@ -138,22 +146,8 @@ void DYYYLiveBoardAudienceEntryStopWatcher(void) {
 @implementation DYYYLiveBoardAudienceEntryTarget
 
 - (void)openBoard:(id)sender {
-    UIViewController *from = self.audienceVC;
-    if (!from) return;
-    // 走到最上层已呈现的控制器再 present：在线观众面板本身可能就是一层
-    // sheet，直接从 room VC present 会被面板盖住；从最上层 present 一定在最前面。
-    UIViewController *top = from;
-    while (top.presentedViewController) top = top.presentedViewController;
-    DYYYLiveBoardViewController *boardVC = [[DYYYLiveBoardViewController alloc] init];
-    // modal 呈现没有返回栈，榜单页自己没有关闭按钮，这里补一个“关闭”。
-    // 只在 presenter 这里设，不改榜单页本身。
-    boardVC.navigationItem.leftBarButtonItem =
-        [[UIBarButtonItem alloc] initWithTitle:@"关闭" style:UIBarButtonItemStylePlain target:self action:@selector(closeBoard:)];
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:boardVC];
-    // 全屏呈现：榜单是表格页（加人/长按菜单/改名字），半屏卡片下不好操作；
-    // 与星牌 modal 全屏的做法一致。
-    nav.modalPresentationStyle = UIModalPresentationFullScreen;
-    [top presentViewController:nav animated:YES completion:nil];
+    // 2.2-9-90：打开榜单的逻辑抽到共用函数里，长按菜单入口也走同一条路。
+    DYYYLiveBoardPresentBoardFromViewController(self.audienceVC);
 }
 
 - (void)closeBoard:(id)sender {
@@ -303,6 +297,35 @@ static NSString *DYYYLiveBoardEntryRecordDiag(NSString *outcome, UIViewControlle
     }
     [NSUserDefaults.standardUserDefaults setObject:ring forKey:kDYYYLiveBoardEntryDiagRingKey];
     return [NSString stringWithFormat:@"入口诊断：%@", diag];
+}
+
+// 2.2-9-90：从 from 出发走到最上层已呈现的控制器，再 present 榜单页
+//（全屏导航 + “关闭”按钮；榜单页自己没有关闭按钮，这里补一个，不改榜单页
+// 本身）。target 用关联对象挂在 boardVC 上保活——UIBarButtonItem 不
+// retain target，不挂关联对象的话点“关闭”时 target 可能已经释放。
+// from 为 nil 时什么都不做；from 是 sheet/面板时，从最上层 present 一定
+// 在最前面，不会被面板盖住。
+void DYYYLiveBoardPresentBoardFromViewController(UIViewController *from) {
+    if (!from) return;
+    UIViewController *top = from;
+    while (top.presentedViewController) top = top.presentedViewController;
+    DYYYLiveBoardAudienceEntryTarget *target = [[DYYYLiveBoardAudienceEntryTarget alloc] init];
+    target.audienceVC = from;
+    DYYYLiveBoardViewController *boardVC = [[DYYYLiveBoardViewController alloc] init];
+    boardVC.navigationItem.leftBarButtonItem =
+        [[UIBarButtonItem alloc] initWithTitle:@"关闭" style:UIBarButtonItemStylePlain target:target action:@selector(closeBoard:)];
+    objc_setAssociatedObject(boardVC, @selector(openBoard:), target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:boardVC];
+    // 全屏呈现：榜单是表格页（加人/长按菜单/改名字），半屏卡片下不好操作；
+    // 与星牌 modal 全屏的做法一致。
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    [top presentViewController:nav animated:YES completion:nil];
+}
+
+// 2.2-9-90：给长按入口写诊断（进 -89 的最近 3 条环），并打 [DYYY-90] 日志。
+void DYYYLiveBoardEntryRecordDiagLine(NSString *outcome, UIViewController *vc) {
+    NSString *diag = DYYYLiveBoardEntryRecordDiag(outcome, vc);
+    NSLog(@"[DYYY-90] %@", diag);
 }
 
 // 2.2-9-89：读最近 3 条诊断（最新在前）+ watcher 心跳行，供榜单设置页
