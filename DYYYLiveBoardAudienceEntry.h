@@ -18,7 +18,14 @@ extern "C" {
 // “在线观众”的 UILabel，取它的父容器（标题栏），在标题左侧空白处加一个
 // “人气榜”胶囊按钮；找不到、或人气榜总开关关着，就什么都不做。
 // 幂等（tag 守卫 + 已装按钮弱引用快路）：面板每次打开都可重调，不会叠加。
+// 2.2-9-87：每次安装尝试都把结果写进 NSUserDefaults（DYYYLiveBoardEntryDiag），
+// 榜单设置页第 0 组页脚现读现显——用户不用找日志，截设置页图就能定位。
 void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC);
+
+// 2.2-9-87：读最近一次安装尝试的诊断（已带“入口诊断：”前缀；
+// 无记录时返回“入口诊断：暂无记录，请先打开一次在线观众面板再回来”）。
+// 供榜单设置页页脚现读现显。
+NSString *DYYYLiveBoardAudienceEntryDiagText(void);
 
 #ifdef __cplusplus
 }
