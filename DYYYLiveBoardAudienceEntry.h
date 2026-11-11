@@ -2,7 +2,9 @@
 // 用户嫌直播间悬浮人气榜面板挡画面：悬浮榜改默认关，入口改放到“在线观众”
 // 面板标题栏左侧的空白处，点一下打开榜单页。
 // 安装点在 DYYYLiveBoardOverlayHooks.xm（IESLiveAudienceViewController 的
-// 生命周期 + presentViewController 完成回调），逻辑全在这里，不另起 .xm。
+// 生命周期 + presentViewController 完成回调，2.2-9-86 起另有 UIViewController
+// 的 viewDidAppear/presentViewController 两钩——面板真正出现时才触发），
+// 逻辑全在这里，不另起 .xm。
 #import <UIKit/UIKit.h>
 
 NS_ASSUME_NONNULL_BEGIN
