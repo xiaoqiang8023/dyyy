@@ -3,6 +3,7 @@
 // 开播时长每秒跳一次，只改可见行的副标题文字，不 reloadData、不动布局
 // （不在 layoutSubviews 里改帧，-53/-57 教训）；排序只在状态变化时重排。
 #import "DYYYLiveBoardAudienceEntry.h"
+#import "DYYYLiveBoardCapsule.h"
 #import "DYYYLiveBoardUI.h"
 #import "DYYYLiveBoardApi.h"
 #import "DYYYLiveBoardModel.h"
@@ -23,6 +24,8 @@ void DYYYInstallLiveBoard(void) {
         [DYYYLiveBoardMonitor.shared start];
         // 2.2-9-73：房间里加了主播/改了开关后，给正在开着的房间补装悬浮榜。
         DYYYLiveBoardOverlayStartWatcher();
+        // 2.2-9-92：同款，给正在开着的房间补装“人气榜”小胶囊。
+        DYYYLiveBoardCapsuleStartWatcher();
     });
 }
 
