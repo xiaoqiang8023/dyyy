@@ -21,6 +21,14 @@ extern "C" {
 // 幂等（tag 守卫 + 已装按钮弱引用快路）：面板每次打开都可重调，不会叠加。
 // 2.2-9-87：每次安装尝试都把结果写进 NSUserDefaults（DYYYLiveBoardEntryDiag），
 // 榜单设置页第 0 组页脚现读现显——用户不用找日志，截设置页图就能定位。
+// 2.2-9-90：供长按菜单入口复用：从 from 出发走到最上层已呈现的控制器，
+// 再 present 榜单页（全屏导航 + “关闭”按钮）。打开榜单的 target 用关联
+// 对象挂在 boardVC 上保活（UIBarButtonItem 不 retain target）。
+void DYYYLiveBoardPresentBoardFromViewController(UIViewController *from);
+
+// 2.2-9-90：给长按入口写诊断（进 -89 的最近 3 条环 + [DYYY-90] 日志）。
+void DYYYLiveBoardEntryRecordDiagLine(NSString *outcome, UIViewController *vc);
+
 void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC);
 
 // 2.2-9-89：判断一个 VC 是不是我们自家页面或设置宿主（榜单页/设置页，
