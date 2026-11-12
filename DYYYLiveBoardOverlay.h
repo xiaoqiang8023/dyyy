@@ -32,6 +32,9 @@ void DYYYLiveBoardOverlayRemoveFromInnerFeedCell(id cell);
 void DYYYLiveBoardOverlayStartWatcher(void);
 // 当前是否应该显示悬浮榜（总开关 + 悬浮开关 + 至少加了一位主播）。
 BOOL DYYYLiveBoardOverlayShouldShow(void);
+// 2.2-9-95：本次房间内强制显示悬浮榜（会话级，不改保存的悬浮开关；
+// 房间退出时 RemoveFromView 清掉标记，下个房间不再强制显示）。
+void DYYYLiveBoardOverlayShowForSession(UIView *root);
 // 2.2-9-92：给人气榜小胶囊复用（-80 的可见标签启发式，不另写一套）。
 BOOL DYYYLiveBoardRootHasVisibleNativeLabel(UIView *view);
 
