@@ -19,6 +19,7 @@
 // 锚点定位面板、把按钮放到标题行左端。
 #import "DYYYLiveBoardAudienceEntry.h"
 #import "DYYYLiveBoardLongPressEntry.h"
+#import "DYYYLiveBoardModel.h"
 #import "DYYYLiveBoardSheet.h"
 #import "DYYYLiveBoardStore.h"
 #import "DYYYLiveBoardUI.h"
@@ -296,6 +297,9 @@ void DYYYLiveBoardPresentBoardFromViewController(UIViewController *from) {
     DYYYLiveBoardAudienceEntryTarget *target = [[DYYYLiveBoardAudienceEntryTarget alloc] init];
     target.audienceVC = from;
     DYYYLiveBoardViewController *boardVC = [[DYYYLiveBoardViewController alloc] init];
+    // 2.2-9-108：从直播间里打开时，取当前房间的主播 uid + 开播起点
+    //（只取一次）；从设置页以外的地方打开、或取不到时为 nil，行为不变。
+    boardVC.roomHint = DYYYLiveBoardRoomHintForViewController(from);
     boardVC.navigationItem.leftBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"关闭" style:UIBarButtonItemStylePlain target:target action:@selector(closeBoard:)];
     objc_setAssociatedObject(boardVC, @selector(openBoard:), target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -319,6 +323,8 @@ void DYYYLiveBoardPresentCompactBoardFromViewController(UIViewController *from) 
     target.audienceVC = from;
     DYYYLiveBoardViewController *boardVC = [[DYYYLiveBoardViewController alloc] init];
     boardVC.compactListOnly = YES;
+    // 2.2-9-108：同上，胶囊点开时取房内主播提示（只取一次）。
+    boardVC.roomHint = DYYYLiveBoardRoomHintForViewController(from);
     boardVC.navigationItem.leftBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"关闭" style:UIBarButtonItemStylePlain target:target action:@selector(closeBoard:)];
     objc_setAssociatedObject(boardVC, @selector(openBoard:), target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -391,9 +397,17 @@ static UIButton *DYYYLiveBoardMakeEntryButton(void) {
     button.tag = kDYYYLiveBoardAudienceEntryTag;
     button.translatesAutoresizingMaskIntoConstraints = NO;
     // 跟抖音原生标题栏 / tab pill 接近的浅灰胶囊，别太扎眼。
-    button.backgroundColor = [UIColor colorWithWhite:0.94 alpha:1.0];
+    // 2.2-9-108：改动态色——浅色底白 0.94 / 字白 0.15（与原来一致），
+    // 深色底白 0.16 / 字白 0.92（深色观众面板里不刺眼）。
+    button.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
+        CGFloat w = trait.userInterfaceStyle == UIUserInterfaceStyleDark ? 0.16 : 0.94;
+        return [UIColor colorWithWhite:w alpha:1.0];
+    }];
     [button setTitle:@"人气榜" forState:UIControlStateNormal];
-    [button setTitleColor:[UIColor colorWithWhite:0.15 alpha:1.0] forState:UIControlStateNormal];
+    [button setTitleColor:[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
+        CGFloat w = trait.userInterfaceStyle == UIUserInterfaceStyleDark ? 0.92 : 0.15;
+        return [UIColor colorWithWhite:w alpha:1.0];
+    }] forState:UIControlStateNormal];
     button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     button.contentEdgeInsets = UIEdgeInsetsMake(0, 12, 0, 12);
     button.layer.cornerRadius = kDYYYLiveBoardAudienceEntryHeight / 2.0;
