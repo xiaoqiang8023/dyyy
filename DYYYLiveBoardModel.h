@@ -8,6 +8,8 @@
 // .xm（DYYYSettings.xm）会调这里的 C 函数，故声明包在 extern "C" 里（-69 教训）。
 #import <Foundation/Foundation.h>
 
+@class UIView, UIViewController;
+
 NS_ASSUME_NONNULL_BEGIN
 
 #ifdef __cplusplus
@@ -83,6 +85,16 @@ NSString *DYYYLiveBoardProfileOtherURL(void);
 // 进主页（直播间进不去时的回退）：aweme://user/profile/<uid> → snssdk1128://user/profile/<uid>。
 BOOL DYYYLiveBoardOpenLiveRoom(NSString *roomID, NSString * _Nullable uid);
 BOOL DYYYLiveBoardOpenProfile(NSString *uid);
+
+// 2.2-9-108: 时长胶囊挂在房间 root 上的房间 model（定义在 DYYY.xm；
+// 开关关着或房间已关时返回 nil）。
+id _Nullable DYYYLiveDurationRoomModelForRootView(UIView * _Nullable root);
+// 2.2-9-108: 房内主播提示——从当前房间取主播 uid + 开播起点（秒时间戳）。
+// 成功返回 @{@"uid": NSString, @"start": NSNumber}，任一项取不到返回 nil
+//（榜单按原来显示，不编数据）。uid 走房间 model 的 owner/anchor →
+// idStr/uid；起点走已开播胶囊同一条路（rawRoom 的 startTime/createTime/
+// liveStartTime，毫秒转秒）。只在打开榜单那一刻取一次，不监听房间切换。
+NSDictionary * _Nullable DYYYLiveBoardRoomHintForViewController(UIViewController * _Nullable fromVC);
 
 #ifdef __cplusplus
 }
