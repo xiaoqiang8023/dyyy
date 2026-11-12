@@ -49,8 +49,12 @@ static const CGFloat kDYYYLiveBoardSheetDismissVelocity = 800.0;
 
     // 小横条：贴在底页顶部中央、导航栏上方 8pt 处（标题在 44pt 栏内居中，
 // 横条 6–11pt，不盖住标题文字）。
+    // 2.2-9-108：改动态色——浅色白 0.55（与原来一致），深色白 0.60。
     UIView *grabber = [[UIView alloc] initWithFrame:CGRectMake(0, 8, 36, 5)];
-    grabber.backgroundColor = [UIColor colorWithWhite:0.55 alpha:1.0];
+    grabber.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
+        CGFloat w = trait.userInterfaceStyle == UIUserInterfaceStyleDark ? 0.60 : 0.55;
+        return [UIColor colorWithWhite:w alpha:1.0];
+    }];
     grabber.layer.cornerRadius = 2.5;
     grabber.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
     grabber.center = CGPointMake(CGRectGetMidX(presentedView.bounds), 10.5);
