@@ -5,7 +5,8 @@
 // 不订阅任何通知；按钮只用自己的 Auto Layout 约束定位；找不到标题栏时
 // 静默返回，不弹提示；2.2-9-87 起每次尝试都把结果写进诊断 defaults
 //（DYYYLiveBoardEntryDiag 单条 + 2.2-9-89 起最近 3 条环
-// DYYYLiveBoardEntryDiagRing），供榜单设置页页脚现读现显。
+// DYYYLiveBoardEntryDiagRing），供榜单设置页页脚现读现显——
+// 2.2-9-93：入口诊断已关闭（用户要求），这段只留作历史。
 // 2.2-9-88：① 进房间后 1 秒轮询 watcher（StartWatcher/StopWatcher）；
 // ② 自家榜单/设置页（类名 DYYY 开头）触发时跳过安装与诊断，不再覆盖
 // 真实诊断；③ 快路只认“可见”的已装按钮，藏在预建面板里的旧按钮不再
@@ -18,9 +19,14 @@
 // 锚点定位面板、把按钮放到标题行左端。
 #import "DYYYLiveBoardAudienceEntry.h"
 #import "DYYYLiveBoardLongPressEntry.h"
+#import "DYYYLiveBoardSheet.h"
 #import "DYYYLiveBoardStore.h"
 #import "DYYYLiveBoardUI.h"
 #import <objc/runtime.h>
+
+// 2.2-9-94：底页 transitioningDelegate 的关联对象键（UIKit 只弱持有
+// transitioningDelegate，不挂关联对象的话呈现过程中 delegate 可能被释放）。
+static const char kDYYYLiveBoardSheetDelegateKey;
 
 // 前向声明（2.2-9-90：定义在文件后半部分，供 AudienceEntryTarget.openBoard
 // 与长按菜单入口共用）。
@@ -78,6 +84,7 @@ static __weak UIViewController *gDYYYLiveBoardEntryWatcherRoomVC = nil;
 //（另记一条时间戳供页脚判断新鲜度），榜单设置页页脚现读现显——没有心跳，
 // 就证明 watcher 根本没在跑；心跳停在进房间之前，说明 watcher 启动过
 // 但后来停了。心跳键定义在这里是因为 StartWatcher 在诊断键定义之前。
+// 2.2-9-93：心跳不再写（入口诊断已关闭），键只剩 DiagText 死代码在读。
 static NSString *const kDYYYLiveBoardEntryWatcherBeatKey = @"DYYYLiveBoardEntryWatcherBeat";
 static NSString *const kDYYYLiveBoardEntryWatcherBeatAtKey = @"DYYYLiveBoardEntryWatcherBeatAt";
 static NSUInteger gDYYYLiveBoardEntryWatcherTickCount = 0;
@@ -101,19 +108,9 @@ void DYYYLiveBoardAudienceEntryStartWatcher(UIViewController *roomVC) {
         }
         // 后台不刷（直播间只在前台看得到）。
         if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
-        // 2.2-9-89：心跳——每跳都写，页脚能直接验证 watcher 是不是真在跑。
-        // 心跳不停，说明 watcher 活着；心跳停了，说明房间已退出或 watcher
-        // 被停掉。心跳写在 Install 之前，这样即使 Install 本身提前返回，
-        // 心跳也照常记录。
+        // 2.2-9-93：心跳不再写 defaults（入口诊断已关闭，没人再读它）；
+        // 跳数只在内存里计着，watcher 本身每跳照常调 Install。
         gDYYYLiveBoardEntryWatcherTickCount++;
-        NSDateFormatter *beatFormatter = [[NSDateFormatter alloc] init];
-        beatFormatter.dateFormat = @"HH:mm:ss";
-        NSString *beat = [NSString stringWithFormat:@"%@ 第%lu跳",
-                          [beatFormatter stringFromDate:[NSDate date]],
-                          (unsigned long)gDYYYLiveBoardEntryWatcherTickCount];
-        [NSUserDefaults.standardUserDefaults setObject:beat forKey:kDYYYLiveBoardEntryWatcherBeatKey];
-        [NSUserDefaults.standardUserDefaults setDouble:[[NSDate date] timeIntervalSince1970]
-                                                forKey:kDYYYLiveBoardEntryWatcherBeatAtKey];
         // watcher 每跳不写“找不到标题”的诊断：面板没打开时本来就找不到，
         // 写了会把面板打开那一刻的真实诊断冲掉；只有找到标题（面板在场）
         // 或已装上时才记，见 InstallWithDiag 的 recordDiag 分支。
@@ -278,25 +275,12 @@ static NSString *const kDYYYLiveBoardEntryDiagKey = @"DYYYLiveBoardEntryDiag";
 // 记录仍留在环里看得见。
 static NSString *const kDYYYLiveBoardEntryDiagRingKey = @"DYYYLiveBoardEntryDiagRing";
 
-// 把一条诊断写进 defaults（单条键照常写一份兼容旧读法，环里再追加一条，
-// 最多 3 条、最新在前），并返回带前缀的完整文案，供日志复用。
-// 格式：HH:mm:ss <触发 VC 类名> <结果>；结果是 总开关关 / 找不到标题 /
-// 找不到容器(最后候选宽-高-左缘，需左缘) / 已装上 之一。
+// 2.2-9-93：入口诊断已关闭。函数与调用点保留（编译不受影响），
+// 但不再写任何 defaults 键、不再返回诊断文案；旧键留在 defaults
+// 里看不见、无害，不做迁移/清理。
 static NSString *DYYYLiveBoardEntryRecordDiag(NSString *outcome, UIViewController *audienceVC) {
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    formatter.dateFormat = @"HH:mm:ss";
-    NSString *time = [formatter stringFromDate:[NSDate date]];
-    NSString *vcName = audienceVC ? NSStringFromClass(audienceVC.class) : @"(nil)";
-    NSString *diag = [NSString stringWithFormat:@"%@ %@ %@", time, vcName, outcome];
-    [NSUserDefaults.standardUserDefaults setObject:diag forKey:kDYYYLiveBoardEntryDiagKey];
-    NSArray *oldRing = [NSUserDefaults.standardUserDefaults arrayForKey:kDYYYLiveBoardEntryDiagRingKey];
-    NSMutableArray *ring = [NSMutableArray arrayWithObject:diag];
-    for (id item in oldRing ?: @[]) {
-        if (ring.count >= 3) break;
-        if ([item isKindOfClass:NSString.class]) [ring addObject:item];
-    }
-    [NSUserDefaults.standardUserDefaults setObject:ring forKey:kDYYYLiveBoardEntryDiagRingKey];
-    return [NSString stringWithFormat:@"入口诊断：%@", diag];
+    (void)outcome; (void)audienceVC;
+    return @"";
 }
 
 // 2.2-9-90：从 from 出发走到最上层已呈现的控制器，再 present 榜单页
@@ -319,6 +303,31 @@ void DYYYLiveBoardPresentBoardFromViewController(UIViewController *from) {
     // 全屏呈现：榜单是表格页（加人/长按菜单/改名字），半屏卡片下不好操作；
     // 与星牌 modal 全屏的做法一致。
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    [top presentViewController:nav animated:YES completion:nil];
+}
+
+// 2.2-9-93：胶囊点开的紧凑榜单——只含主播列表（compactListOnly），
+// 标题“人气榜”、无设置组、无添加组、无页脚；其他入口（在线观众按钮、
+// 长按菜单、推荐页长按）继续走上面的完整页。
+// 2.2-9-94：改成下三分之二底页（自定义呈现控制器）——上三分之一留着
+// 直播间（无遮罩），点外面 / 下滑 / “关闭”收回；内容仍是 -93 的紧凑列表。
+void DYYYLiveBoardPresentCompactBoardFromViewController(UIViewController *from) {
+    if (!from) return;
+    UIViewController *top = from;
+    while (top.presentedViewController) top = top.presentedViewController;
+    DYYYLiveBoardAudienceEntryTarget *target = [[DYYYLiveBoardAudienceEntryTarget alloc] init];
+    target.audienceVC = from;
+    DYYYLiveBoardViewController *boardVC = [[DYYYLiveBoardViewController alloc] init];
+    boardVC.compactListOnly = YES;
+    boardVC.navigationItem.leftBarButtonItem =
+        [[UIBarButtonItem alloc] initWithTitle:@"关闭" style:UIBarButtonItemStylePlain target:target action:@selector(closeBoard:)];
+    objc_setAssociatedObject(boardVC, @selector(openBoard:), target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:boardVC];
+    DYYYLiveBoardSheetTransitioningDelegate *sheetDelegate = [[DYYYLiveBoardSheetTransitioningDelegate alloc] init];
+    nav.modalPresentationStyle = UIModalPresentationCustom;
+    nav.transitioningDelegate = sheetDelegate;
+    objc_setAssociatedObject(nav, &kDYYYLiveBoardSheetDelegateKey, sheetDelegate, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NSLog(@"[DYYY-94] opening compact board as 2/3 sheet");
     [top presentViewController:nav animated:YES completion:nil];
 }
 
