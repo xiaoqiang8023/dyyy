@@ -11,6 +11,12 @@ NS_ASSUME_NONNULL_BEGIN
 // 2.2-9-93：紧凑模式——胶囊点开时只显示主播列表（1 组，无设置组、
 // 无添加组、无页脚）；设置页榜单管理页用完整模式（默认 NO）。
 @property(nonatomic, assign) BOOL compactListOnly;
+// 2.2-9-108：房内主播提示——从直播间里打开榜单时，由打开方在呈现前
+// 一次性填入 @{@"uid": 主播 uid, @"start": 开播起点秒时间戳}；
+// 从设置页打开（不在直播间里）时为 nil，行为跟原来一样。
+// uid 对上的那一行即使轮询还是“未开播”，也显示在播 + 已播时长
+//（人数/场观仍只走轮询数据，没有就不显示，不编数字）。
+@property(nonatomic, strong, nullable) NSDictionary *roomHint;
 @end
 
 // 统一安装入口（DYYYPortsInstall.m 的 constructor 里调）：
