@@ -38,6 +38,16 @@ void DYYYInstallLiveBoard(void) {
 @property(nonatomic, strong) UILabel *valueLabel;
 @property(nonatomic, strong) UISlider *slider;
 @property(nonatomic, copy, nullable) void (^onDragEnd)(void);
+// 2.2-9-94：同一行复用到“弹窗背景”——标题/范围/存的键可配，
+// 默认仍是悬浮榜透明度那套（标题“悬浮榜透明度”、0.2–1.0、@"opacity"）。
+@property(nonatomic, copy) NSString *titleText;
+@property(nonatomic, assign) float minValue;
+@property(nonatomic, assign) float maxValue;
+@property(nonatomic, copy) NSString *optionKey;
+// 2.2-9-98：字号滑杆用——步长（默认 0.01，即原来的两位小数；字号行
+// 设 1.0，按整 pt 走）与数值显示方式（默认百分比；字号行显示“13 pt”）。
+@property(nonatomic, assign) float stepValue;
+@property(nonatomic, assign) BOOL displayAsPoints;
 - (void)updateValue;
 @end
 
@@ -47,7 +57,8 @@ void DYYYInstallLiveBoard(void) {
     if ((self = [super initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil])) {
         self.selectionStyle = UITableViewCellSelectionStyleNone;
         _nameLabel = [UILabel new];
-        _nameLabel.text = @"悬浮榜透明度";
+        _titleText = @"悬浮榜透明度";
+        _nameLabel.text = _titleText;
         _nameLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
         _nameLabel.adjustsFontForContentSizeCategory = YES;
         _nameLabel.numberOfLines = 0;
@@ -59,8 +70,13 @@ void DYYYInstallLiveBoard(void) {
         UIStackView *top = [[UIStackView alloc] initWithArrangedSubviews:@[_nameLabel, _valueLabel]];
         top.spacing = 12;
         _slider = [UISlider new];
-        _slider.minimumValue = 0.2f;
-        _slider.maximumValue = 1.0f;
+        _minValue = 0.2f;
+        _maxValue = 1.0f;
+        _optionKey = @"opacity";
+        _stepValue = 0.01f;
+        _displayAsPoints = NO;
+        _slider.minimumValue = _minValue;
+        _slider.maximumValue = _maxValue;
         _slider.minimumTrackTintColor = DYYYRadarAccent();
         [_slider addTarget:self action:@selector(changed:) forControlEvents:UIControlEventValueChanged];
         [_slider addTarget:self action:@selector(dragEnded:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
@@ -80,17 +96,25 @@ void DYYYInstallLiveBoard(void) {
     return self;
 }
 
+- (void)setTitleText:(NSString *)titleText { _titleText = [titleText copy]; self.nameLabel.text = _titleText; }
+- (void)setMinValue:(float)minValue { _minValue = minValue; self.slider.minimumValue = minValue; }
+- (void)setMaxValue:(float)maxValue { _maxValue = maxValue; self.slider.maximumValue = maxValue; }
+- (void)setOptionKey:(NSString *)optionKey { _optionKey = [optionKey copy]; }
+
 - (void)updateValue {
-    self.valueLabel.text = [NSString stringWithFormat:@"%.0f%%", self.slider.value * 100];
+    if (self.displayAsPoints) self.valueLabel.text = [NSString stringWithFormat:@"%.0f pt", self.slider.value];
+    else self.valueLabel.text = [NSString stringWithFormat:@"%.0f%%", self.slider.value * 100];
     self.slider.accessibilityValue = self.valueLabel.text;
 }
 
 - (void)changed:(UISlider *)slider {
-    // 保留 2 位小数；实时写 store（发 StoreChanged，面板立即改黑底透明度）。
-    float value = roundf(slider.value * 100) / 100;
+    // 按步长取整后实时写 store（发 StoreChanged，面板/胶囊立即改样式）；
+    // 步长 0.01 时与原来保留 2 位小数完全一致，字号行步长 1.0 按整 pt 走。
+    float step = self.stepValue > 0 ? self.stepValue : 0.01f;
+    float value = roundf(slider.value / step) * step;
     slider.value = value;
     [self updateValue];
-    [DYYYLiveBoardStore.shared setOption:@"opacity" value:@(value)];
+    [DYYYLiveBoardStore.shared setOption:self.optionKey value:@(value)];
 }
 
 - (void)dragEnded:(__unused UISlider *)slider {
@@ -104,6 +128,11 @@ void DYYYInstallLiveBoard(void) {
 @property(nonatomic, strong) NSTimer *tickTimer;
 // 2.2-9-72：星牌解析服务（resolveInput 期间持有，流程结束即释放）。
 @property(nonatomic, strong) DYYYFansService *fansService;
+// 2.2-9-95：紧凑模式副标题（在播行的 ● 变绿、其余文字加深），
+// cellForRow 与每秒 tick 共用；完整模式不用它。
+- (NSAttributedString *)attributedSubtitleForAnchor:(NSDictionary *)anchor;
+// 2.2-9-96：“添加主播”按钮（紧凑模式专用，见 viewDidLoad）。
+- (void)addAnchorFromSheet:(id)sender;
 @end
 
 @implementation DYYYLiveBoardViewController
@@ -115,7 +144,8 @@ void DYYYInstallLiveBoard(void) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"直播间人气榜";
+    // 2.2-9-93：紧凑模式标题只叫“人气榜”，完整模式仍是“直播间人气榜”。
+    self.title = self.compactListOnly ? @"人气榜" : @"直播间人气榜";
     self.view.tintColor = DYYYRadarAccent();
     self.tableView.backgroundColor = DYYYRadarBackground();
     self.tableView.rowHeight = UITableViewAutomaticDimension;
@@ -124,6 +154,14 @@ void DYYYInstallLiveBoard(void) {
     self.tableView.sectionFooterHeight = UITableViewAutomaticDimension;
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.navigationItem.backButtonTitle = @"返回";
+    if (self.compactListOnly) {
+        // 2.2-9-96：底页右上角只留“添加主播”一个按钮，且用 plain 样式——
+        // 跟左边“关闭”按钮同一套做法，系统渲染成同样的浅色胶囊，不再
+        // 是 -95 那个黑底自定义 pill（用户嫌丑）；“悬浮窗”按钮已取消。
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"添加主播" style:UIBarButtonItemStylePlain target:self action:@selector(addAnchorFromSheet:)];
+        NSLog(@"[DYYY-96] compact sheet opened");
+    }
+    [self applySheetBackground];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:DYYYLiveBoardChanged object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:DYYYLiveBoardStoreChanged object:nil];
     // 2.2-9-80：长按主播行 → 菜单（改名字 / 移除），与左滑菜单同一套流程。
@@ -138,6 +176,7 @@ void DYYYInstallLiveBoard(void) {
     [DYYYLiveBoardMonitor.shared synchronizeAccount];
     [self resort];
     [self.tableView reloadData];
+    [self applySheetBackground];
     if ([DYYYLiveBoardStore.shared enabled]) [DYYYLiveBoardMonitor.shared checkNow];
     [self startTick];
 }
@@ -174,10 +213,32 @@ void DYYYInstallLiveBoard(void) {
     }];
 }
 
+// 2.2-9-93：主播行所在组——完整模式是 section 1，紧凑模式只有 1 组、
+// 主播行就是 section 0。以下所有按组号分的逻辑都走它，不再写死 1。
+- (NSInteger)anchorSection { return self.compactListOnly ? 0 : 1; }
+
 - (NSString *)subtitleForAnchor:(NSDictionary *)anchor {
     NSDictionary *state = [DYYYLiveBoardMonitor.shared stateForUID:anchor[@"uid"]];
     NSString *error = DYYYRadarString(state[@"error"]);
     if ([state[@"live"] boolValue]) {
+        if (self.compactListOnly) {
+            // 2.2-9-93：紧凑模式副标题分两行写死换行，不让系统在词中换行——
+            // 第 1 行“在播 · 在线人数”，第 2 行“场观 · 已播时长”；
+            // 没读到的那项不写，不断词、不断行。
+            NSMutableString *line1 = [NSMutableString stringWithString:@"● 在播"];
+            NSNumber *viewers = state[@"viewers"];
+            if (viewers) [line1 appendFormat:@" · %@在线", DYYYLiveBoardFormatCountCompact(viewers.longLongValue)];
+            else [line1 appendString:@" · 在线人数暂未读到"];
+            NSMutableArray<NSString *> *line2Parts = [NSMutableArray array];
+            NSNumber *total = state[@"totalViewers"];
+            if (total.longLongValue > 0) [line2Parts addObject:[NSString stringWithFormat:@"场观 %@", DYYYLiveBoardFormatCountCompact(total.longLongValue)]];
+            NSString *digits = [state[@"start"] doubleValue] > 0 ? DYYYLiveBoardElapsedDigits([state[@"start"] doubleValue]) : nil;
+            if (digits.length) [line2Parts addObject:[NSString stringWithFormat:@"已播 %@", digits]];
+            NSString *text = line1;
+            if (line2Parts.count) text = [text stringByAppendingFormat:@"\n%@", [line2Parts componentsJoinedByString:@" · "]];
+            if (error.length) text = [text stringByAppendingString:@"\n上次刷新失败，显示的是上次数据"];
+            return text;
+        }
         NSMutableString *text = [NSMutableString stringWithString:@"● 在播"];
         NSNumber *viewers = state[@"viewers"];
         if (viewers) [text appendFormat:@" · %@在线", DYYYLiveBoardFormatCountCompact(viewers.longLongValue)];
@@ -196,6 +257,52 @@ void DYYYInstallLiveBoard(void) {
     return @"暂未读取";
 }
 
+// 2.2-9-95：紧凑模式专用——副标题的富文本版。在播行开头的 ●
+// 涂绿（RGB 0.20 / 0.78 / 0.35，与 -90 的行图标同款绿），其余文字
+// 涂深灰（white 0.30，见变化 2）；未开播行没有 ●，整行都是深灰。
+// 只在紧凑模式调，完整模式继续走 plain secondaryText。
+- (NSAttributedString *)attributedSubtitleForAnchor:(NSDictionary *)anchor {
+    NSString *subtitle = [self subtitleForAnchor:anchor];
+    UIColor *subColor = [UIColor colorWithWhite:0.30 alpha:1.0];
+    NSMutableAttributedString *attr = [[NSMutableAttributedString alloc]
+        initWithString:subtitle attributes:@{NSForegroundColorAttributeName: subColor}];
+    if ([subtitle hasPrefix:@"●"]) {
+        UIColor *green = [UIColor colorWithRed:0.20 green:0.78 blue:0.35 alpha:1.0];
+        [attr addAttribute:NSForegroundColorAttributeName value:green range:NSMakeRange(0, 1)];
+    }
+    return attr;
+}
+
+// 2.2-9-95：“添加主播”——复用设置页同一套 addAnchorSheet 流程
+//（抖音号 / UID / 分享链接，核对后添加，上限 20）。
+- (void)addAnchorFromSheet:(id)sender {
+    (void)sender;
+    NSLog(@"[DYYY-95] add-anchor button: open addAnchorSheet");
+    [self addAnchorSheet];
+}
+
+// 2.2-9-94：紧凑模式（底页）才调底色不透明度——表底 + 行底 +
+// 导航栏底色按“弹窗背景”滑杆值走，文字全不透明；完整模式（设置页）不动。
+// StoreChanged 会走到 reload，滑杆拖动时底页实时跟着变。
+- (void)applySheetBackground {
+    if (!self.compactListOnly) return;
+    CGFloat alpha = (CGFloat)[DYYYLiveBoardStore.shared sheetBackgroundOpacity];
+    UIColor *bg = [DYYYRadarBackground() colorWithAlphaComponent:alpha];
+    self.view.backgroundColor = bg;
+    self.tableView.backgroundColor = bg;
+    self.navigationController.navigationBar.barTintColor = bg;
+    // 2.2-9-95：底页文字加深——导航标题近黑、“关闭”按钮近黑
+    //（tintColor 影响 plain 按钮；2.2-9-96 起右上角“添加主播”也是
+    // plain，跟“关闭”一样近黑）；文字全不透明，滑杆行为不变。
+    UIColor *nearBlack = [UIColor colorWithWhite:0.05 alpha:1.0];
+    self.navigationController.navigationBar.titleTextAttributes = @{NSForegroundColorAttributeName: nearBlack};
+    self.navigationController.navigationBar.tintColor = nearBlack;
+    for (UITableViewCell *cell in self.tableView.visibleCells) {
+        cell.backgroundColor = bg;
+        cell.contentView.backgroundColor = UIColor.clearColor;
+    }
+}
+
 - (void)reload {
     if (!NSThread.isMainThread) { dispatch_async(dispatch_get_main_queue(), ^{ [self reload]; }); return; }
     // 2.2-9-75：拖透明度滑杆时不重建 cell，否则拖动会被打断
@@ -207,6 +314,7 @@ void DYYYInstallLiveBoard(void) {
     }
     [self resort];
     [self.tableView reloadData];
+    [self applySheetBackground];
 }
 
 // 每秒只改可见行副标题里的“已播 HH:MM:SS”，不动布局、不重排。
@@ -218,12 +326,17 @@ void DYYYInstallLiveBoard(void) {
         if (!self || !self.view.window) return;
         for (UITableViewCell *cell in self.tableView.visibleCells) {
             NSIndexPath *path = [self.tableView indexPathForCell:cell];
-            if (!path || path.section != 1 || path.row >= (NSInteger)self.sorted.count) continue;
+            if (!path || path.section != [self anchorSection] || path.row >= (NSInteger)self.sorted.count) continue;
             NSDictionary *anchor = self.sorted[(NSUInteger)path.row];
             UIListContentConfiguration *config = [(UIListContentConfiguration *)cell.contentConfiguration copy];
             NSString *subtitle = [self subtitleForAnchor:anchor];
             if ([config.secondaryText isEqualToString:subtitle]) continue;
             config.secondaryText = subtitle;
+            if (self.compactListOnly) {
+                // 2.2-9-95：先设 plain 文本（上面那行相等判断用它），再盖
+                // 富文本——否则下一秒 tick 会把绿点刷回普通灰字。
+                config.secondaryAttributedText = [self attributedSubtitleForAnchor:anchor];
+            }
             cell.contentConfiguration = config;
         }
     }];
@@ -233,23 +346,34 @@ void DYYYInstallLiveBoard(void) {
 
 #pragma mark - 表格
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    // 2.2-9-93：紧凑模式只有主播列表 1 组。
+    return self.compactListOnly ? 1 : 3;
+}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 5;
-    if (section == 1) return (NSInteger)self.sorted.count;
+    if (section == [self anchorSection]) return (NSInteger)self.sorted.count;
+    if (section == 0) return 8;
     return 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (section == [self anchorSection]) return [NSString stringWithFormat:@"主播 · %lu / %lu", (unsigned long)self.sorted.count, (unsigned long)DYYYLiveBoardMaxAnchors];
     if (section == 0) return @"设置";
-    if (section == 1) return [NSString stringWithFormat:@"主播 · %lu / %lu", (unsigned long)self.sorted.count, (unsigned long)DYYYLiveBoardMaxAnchors];
     return @"添加主播";
 }
+// 2.2-9-95：紧凑模式组头“主播 · N/20”加深（white 0.35）；完整模式
+// 与设置页不动（系统默认色）。
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section {
+    if (!self.compactListOnly || section != [self anchorSection]) return;
+    if ([view isKindOfClass:UITableViewHeaderFooterView.class]) {
+        ((UITableViewHeaderFooterView *)view).textLabel.textColor = [UIColor colorWithWhite:0.35 alpha:1.0];
+    }
+}
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    // 2.2-9-93：紧凑模式没有页脚（“上次刷新…”那行不要了）；完整模式
+    // 第 0 组页脚也不再带入口诊断（-93 已关掉，见 AudienceEntry.m）。
+    if (self.compactListOnly) return nil;
     if (section != 1) {
-        // 2.2-9-87：第 0 组页脚现读现显入口诊断（每次打开设置页 reload 时重读，
-        // 无记录时显示“暂无记录，请先打开一次在线观众面板再回来”）。
-        // 只读一条 defaults，不加开关、不改任何行。
-        if (section == 0) return [NSString stringWithFormat:@"关闭总开关后停止轮询，已加的主播会保留。\n%@", DYYYLiveBoardAudienceEntryDiagText()];
+        if (section == 0) return @"关闭总开关后停止轮询，已加的主播会保留。";
         return @"输入对方主页显示的抖音号、UID 或分享链接，核对后添加；每位主播先查在没在播，\n在播才拉人数和开播时长。榜单里左滑一行可以改名字或移除主播，也可以长按一行改名字或移除主播。";
     }
     NSTimeInterval last = [DYYYLiveBoardMonitor.shared lastCheckAt];
@@ -271,6 +395,30 @@ void DYYYInstallLiveBoard(void) {
     return [NSString stringWithFormat:@"%@ · 取数：%@\n只在抖音前台轮询，退后台即停；主播较多时一轮要排队，先查最久没查的那位。", timeText, sourceText];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
+    if (path.section == [self anchorSection]) {
+        NSDictionary *anchor = self.sorted[(NSUInteger)path.row];
+        UITableViewCell *cell = DYYYRadarPersonCell(anchor, [self subtitleForAnchor:anchor], YES);
+        if (self.compactListOnly) {
+            // 2.2-9-94：底页行底跟“弹窗背景”滑杆走（行每次重建，这里现设）。
+            CGFloat alpha = (CGFloat)[DYYYLiveBoardStore.shared sheetBackgroundOpacity];
+            UIColor *bg = [DYYYRadarBackground() colorWithAlphaComponent:alpha];
+            cell.backgroundColor = bg;
+            cell.contentView.backgroundColor = UIColor.clearColor;
+            UIView *selectedBackground = [[UIView alloc] init];
+            selectedBackground.backgroundColor = [UIColor colorWithWhite:0.80 alpha:alpha];
+            cell.selectedBackgroundView = selectedBackground;
+            // 2.2-9-95：底页文字加深——名字近黑（white 0.05）、副标题
+            // 深灰（white 0.30，富文本里自带同色），两行副标题不裁剪；
+            // 在播行开头的 ● 涂绿（attributedSubtitleForAnchor:）。
+            UIListContentConfiguration *config = [(UIListContentConfiguration *)cell.contentConfiguration copy];
+            config.textProperties.color = [UIColor colorWithWhite:0.05 alpha:1.0];
+            config.secondaryTextProperties.color = [UIColor colorWithWhite:0.30 alpha:1.0];
+            config.secondaryTextProperties.numberOfLines = 0;
+            config.secondaryAttributedText = [self attributedSubtitleForAnchor:anchor];
+            cell.contentConfiguration = config;
+        }
+        return cell;
+    }
     if (path.section == 0) {
         if (path.row == 0) {
             UITableViewCell *cell = DYYYPortsIconCell(@"开启人气榜", [DYYYLiveBoardStore.shared enabled] ? @"正在前台轮询" : @"关闭后停止轮询", @"person.3.sequence.fill", NO);
@@ -301,19 +449,57 @@ void DYYYInstallLiveBoard(void) {
             cell.onDragEnd = ^{ [weakSelf reload]; };
             return cell;
         }
-        if (path.row == 3) return DYYYPortsValueCell(@"刷新间隔", [NSString stringWithFormat:@"每 %ld 秒一轮", (long)[DYYYLiveBoardStore.shared interval]], @"timer", YES);
+        if (path.row == 3) {
+            // 2.2-9-94：弹窗背景滑杆（30%–100%，默认 85%，只改底页底色）。
+            DYYYLiveBoardOpacitySliderCell *cell = [[DYYYLiveBoardOpacitySliderCell alloc] init];
+            cell.titleText = @"弹窗背景";
+            cell.minValue = 0.3f;
+            cell.maxValue = 1.0f;
+            cell.optionKey = @"sheetBackgroundOpacity";
+            cell.slider.value = (float)[DYYYLiveBoardStore.shared sheetBackgroundOpacity];
+            [cell updateValue];
+            __weak typeof(self) weakSelf = self;
+            cell.onDragEnd = ^{ [weakSelf reload]; };
+            return cell;
+        }
+        if (path.row == 4) {
+            // 2.2-9-98：胶囊背景透明滑杆（10%–100%，默认 42%，只改胶囊黑底）。
+            DYYYLiveBoardOpacitySliderCell *cell = [[DYYYLiveBoardOpacitySliderCell alloc] init];
+            cell.titleText = @"胶囊背景透明";
+            cell.minValue = 0.1f;
+            cell.maxValue = 1.0f;
+            cell.optionKey = @"capsuleBackgroundOpacity";
+            cell.slider.value = (float)[DYYYLiveBoardStore.shared capsuleBackgroundOpacity];
+            [cell updateValue];
+            __weak typeof(self) weakSelf = self;
+            cell.onDragEnd = ^{ [weakSelf reload]; };
+            return cell;
+        }
+        if (path.row == 5) {
+            // 2.2-9-98：胶囊字体大小滑杆（11–18pt，默认 13pt，胶囊高度 = 字号 + 13）。
+            DYYYLiveBoardOpacitySliderCell *cell = [[DYYYLiveBoardOpacitySliderCell alloc] init];
+            cell.titleText = @"胶囊字体大小";
+            cell.minValue = 11.0f;
+            cell.maxValue = 18.0f;
+            cell.stepValue = 1.0f;
+            cell.displayAsPoints = YES;
+            cell.optionKey = @"capsuleFontSize";
+            cell.slider.value = (float)[DYYYLiveBoardStore.shared capsuleFontSize];
+            [cell updateValue];
+            __weak typeof(self) weakSelf = self;
+            cell.onDragEnd = ^{ [weakSelf reload]; };
+            return cell;
+        }
+        if (path.row == 6) return DYYYPortsValueCell(@"刷新间隔", [NSString stringWithFormat:@"每 %ld 秒一轮", (long)[DYYYLiveBoardStore.shared interval]], @"timer", YES);
+        if (path.row == 7) return DYYYPortsIconCell(@"立即刷新", DYYYLiveBoardMonitor.shared.status, @"arrow.clockwise", NO);
         return DYYYPortsIconCell(@"立即刷新", DYYYLiveBoardMonitor.shared.status, @"arrow.clockwise", NO);
-    }
-    if (path.section == 1) {
-        NSDictionary *anchor = self.sorted[(NSUInteger)path.row];
-        return DYYYRadarPersonCell(anchor, [self subtitleForAnchor:anchor], YES);
     }
     return DYYYPortsIconCell(@"添加主播", @"输入抖音号、UID 或分享链接，核对后添加", @"person.crop.circle.badge.plus", YES);
 }
-- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)path { return path.section == 1; }
+- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)path { return path.section == [self anchorSection]; }
 // 2.2-9-72：左滑菜单改名字 + 移除（替换原来的 commitEditingStyle 删除）。
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsForRowAtIndexPath:(NSIndexPath *)path {
-    if (path.section != 1) return nil;
+    if (path.section != [self anchorSection]) return nil;
     NSDictionary *anchor = self.sorted[(NSUInteger)path.row];
     __weak typeof(self) weakSelf = self;
     UIContextualAction *rename = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"改名字" handler:^(__unused UIContextualAction *action, __unused UIView *sourceView, void (^completion)(BOOL)) {
@@ -340,7 +526,7 @@ void DYYYInstallLiveBoard(void) {
 - (void)handleAnchorLongPress:(UILongPressGestureRecognizer *)press {
     if (press.state != UIGestureRecognizerStateBegan) return;
     NSIndexPath *path = [self.tableView indexPathForRowAtPoint:[press locationInView:self.tableView]];
-    if (!path || path.section != 1 || path.row >= (NSInteger)self.sorted.count) return;
+    if (!path || path.section != [self anchorSection] || path.row >= (NSInteger)self.sorted.count) return;
     NSDictionary *anchor = self.sorted[(NSUInteger)path.row];
     NSString *name = DYYYRadarDisplayName(anchor);
     __weak typeof(self) weakSelf = self;
@@ -393,9 +579,28 @@ void DYYYInstallLiveBoard(void) {
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path {
     [tableView deselectRowAtIndexPath:path animated:YES];
+    // 2.2-9-93：主播行先认（紧凑模式它在 section 0，完整模式在 section 1）。
+    if (path.section == [self anchorSection]) {
+        NSDictionary *anchor = self.sorted[(NSUInteger)path.row];
+        NSDictionary *state = [DYYYLiveBoardMonitor.shared stateForUID:anchor[@"uid"]];
+        NSString *roomID = DYYYRadarString(state[@"roomID"]);
+        if ([state[@"live"] boolValue] && roomID.length) {
+            // 在播：先进直播间，进不去再打开主页。
+            if (DYYYLiveBoardOpenLiveRoom(roomID, anchor[@"uid"])) return;
+            if (DYYYLiveBoardOpenProfile(anchor[@"uid"])) return;
+            DYYYRadarToast(self, @"暂时打不开直播间，请稍后再试");
+            return;
+        }
+        if (!DYYYLiveBoardOpenProfile(anchor[@"uid"])) DYYYRadarToast(self, @"暂时打不开主页，请稍后再试");
+        return;
+    }
+    if (self.compactListOnly) return;
     if (path.section == 0) {
-        if (path.row == 3) { [self editInterval]; return; }
-        if (path.row == 4) {
+        // 2.2-9-98：第 0 组行号变了：0 开关、1 悬浮开关、2 悬浮榜透明度、
+        // 3 弹窗背景、4 胶囊背景透明、5 胶囊字体大小、6 刷新间隔、7 立即刷新。
+        // 2.2-9-104：西游隐藏功能已彻底去掉，第 0 组回到 8 行。
+        if (path.row == 6) { [self editInterval]; return; }
+        if (path.row == 7) {
             if (![DYYYLiveBoardStore.shared enabled]) { DYYYRadarMessage(self, @"人气榜未开启", @"先打开上方的总开关，再点立即刷新。"); return; }
             [DYYYLiveBoardMonitor.shared checkNow];
             DYYYRadarToast(self, @"已安排刷新");
@@ -404,18 +609,6 @@ void DYYYInstallLiveBoard(void) {
         return;
     }
     if (path.section == 2) { [self addAnchorSheet]; return; }
-    if (path.section != 1) return;
-    NSDictionary *anchor = self.sorted[(NSUInteger)path.row];
-    NSDictionary *state = [DYYYLiveBoardMonitor.shared stateForUID:anchor[@"uid"]];
-    NSString *roomID = DYYYRadarString(state[@"roomID"]);
-    if ([state[@"live"] boolValue] && roomID.length) {
-        // 在播：先进直播间，进不去再打开主页。
-        if (DYYYLiveBoardOpenLiveRoom(roomID, anchor[@"uid"])) return;
-        if (DYYYLiveBoardOpenProfile(anchor[@"uid"])) return;
-        DYYYRadarToast(self, @"暂时打不开直播间，请稍后再试");
-        return;
-    }
-    if (!DYYYLiveBoardOpenProfile(anchor[@"uid"])) DYYYRadarToast(self, @"暂时打不开主页，请稍后再试");
 }
 
 #pragma mark - 添加主播
