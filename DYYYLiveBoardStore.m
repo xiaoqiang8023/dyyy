@@ -73,7 +73,10 @@ static BOOL DYYYLiveBoardValidAnchor(id value) {
     return @{@"enabled": @([defaults objectForKey:DYYYLiveBoardEnabledKey] ? [defaults boolForKey:DYYYLiveBoardEnabledKey] : NO),
              @"interval": @([self interval]),
              @"overlay": @([self overlayEnabled]),
-             @"opacity": @([self overlayOpacity])};
+             @"opacity": @([self overlayOpacity]),
+             @"sheetBackgroundOpacity": @([self sheetBackgroundOpacity]),
+             @"capsuleBackgroundOpacity": @([self capsuleBackgroundOpacity]),
+             @"capsuleFontSize": @([self capsuleFontSize])};
 }
 - (BOOL)enabled { return [NSUserDefaults.standardUserDefaults boolForKey:DYYYLiveBoardEnabledKey]; }
 - (BOOL)overlayEnabled {
@@ -90,6 +93,24 @@ static BOOL DYYYLiveBoardValidAnchor(id value) {
     if (![defaults objectForKey:DYYYLiveBoardOverlayOpacityKey]) return 0.64;
     return fmin(1.0, fmax(0.2, [defaults doubleForKey:DYYYLiveBoardOverlayOpacityKey]));
 }
+// 2.2-9-94：底页背景不透明度，未写过视为 0.85，钳制 0.3–1.0。
+- (double)sheetBackgroundOpacity {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults objectForKey:DYYYLiveBoardSheetBackgroundOpacityKey]) return 0.85;
+    return fmin(1.0, fmax(0.3, [defaults doubleForKey:DYYYLiveBoardSheetBackgroundOpacityKey]));
+}
+// 2.2-9-98：胶囊背景不透明度，未写过视为 0.42（-97 的样子），钳制 0.1–1.0。
+- (double)capsuleBackgroundOpacity {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults objectForKey:DYYYLiveBoardCapsuleBackgroundOpacityKey]) return 0.42;
+    return fmin(1.0, fmax(0.1, [defaults doubleForKey:DYYYLiveBoardCapsuleBackgroundOpacityKey]));
+}
+// 2.2-9-98：胶囊字号，未写过视为 13pt（-97 的样子），钳制 11–18pt。
+- (double)capsuleFontSize {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults objectForKey:DYYYLiveBoardCapsuleFontSizeKey]) return 13.0;
+    return fmin(18.0, fmax(11.0, [defaults doubleForKey:DYYYLiveBoardCapsuleFontSizeKey]));
+}
 - (NSTimeInterval)interval {
     double value = [NSUserDefaults.standardUserDefaults doubleForKey:DYYYLiveBoardIntervalKey];
     if (value <= 0) return 30;
@@ -101,6 +122,9 @@ static BOOL DYYYLiveBoardValidAnchor(id value) {
     else if ([key isEqualToString:@"interval"]) [defaults setDouble:fmin(300, fmax(10, [value doubleValue])) forKey:DYYYLiveBoardIntervalKey];
     else if ([key isEqualToString:@"overlay"]) [defaults setBool:[value boolValue] forKey:DYYYLiveBoardOverlayKey];
     else if ([key isEqualToString:@"opacity"]) [defaults setDouble:fmin(1.0, fmax(0.2, [value doubleValue])) forKey:DYYYLiveBoardOverlayOpacityKey];
+    else if ([key isEqualToString:@"sheetBackgroundOpacity"]) [defaults setDouble:fmin(1.0, fmax(0.3, [value doubleValue])) forKey:DYYYLiveBoardSheetBackgroundOpacityKey];
+    else if ([key isEqualToString:@"capsuleBackgroundOpacity"]) [defaults setDouble:fmin(1.0, fmax(0.1, [value doubleValue])) forKey:DYYYLiveBoardCapsuleBackgroundOpacityKey];
+    else if ([key isEqualToString:@"capsuleFontSize"]) [defaults setDouble:fmin(18.0, fmax(11.0, [value doubleValue])) forKey:DYYYLiveBoardCapsuleFontSizeKey];
     [defaults synchronize];
     [NSNotificationCenter.defaultCenter postNotificationName:DYYYLiveBoardStoreChanged object:self];
 }
