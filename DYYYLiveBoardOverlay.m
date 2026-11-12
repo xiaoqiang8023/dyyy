@@ -610,17 +610,26 @@ BOOL DYYYLiveBoardRootHasVisibleNativeLabel(UIView *view) {
     [self restorePanel];
 }
 
-// 恢复的唯一出口：小标签、隐形条和点按都走这里。
-- (void)restorePanel {
-    if (!self.isHiddenBySwipe) return;
-    UIView *root = self.superview;
-    if (!root) return;
+// 2.2-9-96：拆小标签的唯一出口。pillButton/edgeStrip 是 root 的子视图
+// （不是面板的子视图），只拆面板会把它们落在复用的 root 上——下个
+// 房间开关关着也会露出来（用户截图左边缘的竖排“人气榜”就是它）。
+// 拆面板的两条路（RemoveFromView、InstallOnView 里 ShouldShow 为假）
+// 都调这里；恢复面板也走这里。
+- (void)removePillTab {
     [self.pillButton removeFromSuperview];
     self.pillButton = nil;
     self.pillVisual = nil;
     [self.edgeStrip removeFromSuperview];
     self.edgeStrip = nil;
     self.hiddenBySwipe = NO;
+}
+
+// 恢复的唯一出口：小标签、隐形条和点按都走这里。
+- (void)restorePanel {
+    if (!self.isHiddenBySwipe) return;
+    UIView *root = self.superview;
+    if (!root) return;
+    [self removePillTab];
     CGPoint target = [self clampedCenter:self.preHideCenter inRoot:root];
     [UIView animateWithDuration:0.25 animations:^{
         self.center = target;
@@ -744,6 +753,10 @@ BOOL DYYYLiveBoardRootHasVisibleNativeLabel(UIView *view) {
 // 重进，StoreChanged 的 watcher 用这个 root 补装。
 static __weak UIView *sDYYYLiveBoardOverlayLastRoot;
 static id sDYYYLiveBoardOverlayWatcherToken;
+// 2.2-9-95：会话级强制显示标记（底页“悬浮窗”按钮置起）。只绕过
+// overlayEnabled 开关，不写 defaults、不动保存的开关；房间退出、
+// 容器拆除、inner feed cell 复用时 RemoveFromView 清掉。
+static BOOL sDYYYLiveBoardOverlaySessionOnly = NO;
 
 // 房间里加了主播/改了开关后，给正在开着的房间补装悬浮榜（StoreChanged 时调）。
 // 只在 lastRoot 还在窗口里时装；安装本身幂等，已装上时只刷新 + 置顶。
@@ -759,7 +772,10 @@ void DYYYLiveBoardOverlayStartWatcher(void) {
 }
 
 BOOL DYYYLiveBoardOverlayShouldShow(void) {
-    return [DYYYLiveBoardStore.shared enabled] && [DYYYLiveBoardStore.shared overlayEnabled] &&
+    // 2.2-9-95：会话级标记置起时绕过 overlayEnabled 开关（总开关与
+    // 至少一位主播仍把关）；标记没置起时与原来完全一致。
+    return [DYYYLiveBoardStore.shared enabled] &&
+        ([DYYYLiveBoardStore.shared overlayEnabled] || sDYYYLiveBoardOverlaySessionOnly) &&
         DYYYLiveBoardStore.shared.anchors.count > 0;
 }
 
@@ -791,6 +807,9 @@ void DYYYLiveBoardOverlayInstallOnView(UIView *root) {
     [DYYYLiveBoardMonitor.shared synchronizeAccount];
     DYYYLiveBoardOverlayView *overlay = objc_getAssociatedObject(root, kDYYYLiveBoardOverlayViewKey);
     if (!DYYYLiveBoardOverlayShouldShow()) {
+        // 2.2-9-96：开关关着时连小标签一起拆——不然右滑藏起的面板被
+        // 拆掉后，竖排“人气榜”小标签还留在 root 上。
+        [overlay removePillTab];
         [overlay removeFromSuperview];
         if (overlay) objc_setAssociatedObject(root, kDYYYLiveBoardOverlayViewKey, nil, OBJC_ASSOCIATION_ASSIGN);
         return;
@@ -816,9 +835,25 @@ void DYYYLiveBoardOverlayRemoveFromView(UIView *root) {
         dispatch_async(dispatch_get_main_queue(), ^{ DYYYLiveBoardOverlayRemoveFromView(root); });
         return;
     }
+    // 2.2-9-95：房间退出/容器拆除/cell 复用时清掉会话级标记，下个房间
+    // 不再强制显示悬浮榜（保存的 overlayEnabled 开关从头到尾没动过）。
+    sDYYYLiveBoardOverlaySessionOnly = NO;
     DYYYLiveBoardOverlayView *overlay = objc_getAssociatedObject(root, kDYYYLiveBoardOverlayViewKey);
+    // 2.2-9-96：小标签 + 隐形条是 root 的子视图，拆面板时一起拆掉，
+    // 不然 inner feed cell 复用后它们会留在下个房间里（开关关着也露出来）。
+    [overlay removePillTab];
     [overlay removeFromSuperview];
     objc_setAssociatedObject(root, kDYYYLiveBoardOverlayViewKey, nil, OBJC_ASSOCIATION_ASSIGN);
+}
+
+// 2.2-9-95：底页“悬浮窗”按钮的会话级入口——置起标记后走幂等的
+// InstallOnView（面板已在就只刷新 + 置顶）。不写 defaults。
+// 2.2-9-96：按钮已取消，本函数暂无调用点，留着备用（不删）。
+void DYYYLiveBoardOverlayShowForSession(UIView *root) {
+    if (!root) return;
+    sDYYYLiveBoardOverlaySessionOnly = YES;
+    NSLog(@"[DYYY-95] ShowForSession: session-only overlay on");
+    DYYYLiveBoardOverlayInstallOnView(root);
 }
 
 void DYYYLiveBoardOverlayInstallFromContainer(id container) {
