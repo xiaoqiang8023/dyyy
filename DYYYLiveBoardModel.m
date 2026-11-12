@@ -5,6 +5,7 @@
 #import "DYYYLiveBoardModel.h"
 #import "DYYYRadarModel.h"
 #import "DYYYRadarNetwork.h"
+#import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <math.h>
 
@@ -334,4 +335,63 @@ BOOL DYYYLiveBoardOpenProfile(NSString *uid) {
     if (!DYYYRadarIdentifier(uid)) return NO;
     if (DYYYLiveBoardTransfer([@"aweme://user/profile/" stringByAppendingString:uid])) return YES;
     return DYYYLiveBoardTransfer([@"snssdk1128://user/profile/" stringByAppendingString:uid]);
+}
+
+// 2.2-9-108: 房间 model 里取主播 uid。先找 owner/anchor 这类主播对象
+//（HTSLiveUser 的 idStr），再退回房间对象上平铺的 uid 字段；
+// 全是 @try 的安全 KVC（DYYYLiveBoardValueForKey），读不到返回 nil。
+static NSString *DYYYLiveBoardRoomHintOwnerUID(id room) {
+    if (!room) return nil;
+    for (NSString *ownerKey in @[@"owner", @"anchor", @"roomOwner", @"user", @"author"]) {
+        id owner = DYYYLiveBoardValueForKey(room, ownerKey);
+        if (!owner || owner == room) continue;
+        if ([owner isKindOfClass:[NSNumber class]] && [owner longLongValue] > 0) return [owner stringValue];
+        for (NSString *idKey in @[@"idStr", @"uid", @"userID", @"id", @"user_id"]) {
+            id raw = DYYYLiveBoardValueForKey(owner, idKey);
+            NSString *value = nil;
+            if ([raw isKindOfClass:[NSNumber class]]) value = [raw stringValue];
+            else if ([raw isKindOfClass:[NSString class]]) value = raw;
+            if (value.length && ![value isEqual:@"0"]) return value;
+        }
+    }
+    for (NSString *idKey in @[@"ownerId", @"anchorId", @"anchorUid", @"userId"]) {
+        id raw = DYYYLiveBoardValueForKey(room, idKey);
+        NSString *value = nil;
+        if ([raw isKindOfClass:[NSNumber class]]) value = [raw stringValue];
+        else if ([raw isKindOfClass:[NSString class]]) value = raw;
+        if (value.length && ![value isEqual:@"0"]) return value;
+    }
+    return nil;
+}
+
+// 2.2-9-108: 房内主播提示。主路取时长胶囊挂在房间 root 上的房间 model
+//（与“已开播”数字同源）；取不到时（时长开关关着，root 上没挂）再顺着
+// fromVC 及其 parent 链找 roomModel/rawRoom/liveRoom，起点合法才认。
+// uid 与起点任一取不到返回 nil——榜单按原来显示，不编数据。
+NSDictionary *DYYYLiveBoardRoomHintForViewController(UIViewController *fromVC) {
+    if (!fromVC) return nil;
+    id room = DYYYLiveDurationRoomModelForRootView(fromVC.view);
+    if (!room) {
+        UIViewController *vc = fromVC;
+        for (NSInteger level = 0; level < 3 && vc; level++) {
+            for (NSString *key in @[@"roomModel", @"rawRoom", @"liveRoom", @"room", @"rawHTSLiveRoomModel", @"rawDataRoomModel"]) {
+                id candidate = DYYYLiveBoardValueForKey(vc, key);
+                if (candidate && DYYYLiveBoardRoomStartRelaxed(candidate) > 0) { room = candidate; break; }
+            }
+            if (room) break;
+            vc = vc.parentViewController;
+        }
+    }
+    if (!room) {
+        NSLog(@"[DYYY-108] room hint: no room model");
+        return nil;
+    }
+    NSString *uid = DYYYLiveBoardRoomHintOwnerUID(room);
+    double start = DYYYLiveBoardRoomStartRelaxed(room);
+    if (!uid.length || start <= 0) {
+        NSLog(@"[DYYY-108] room hint: incomplete (uid=%@ start=%.0f)", uid.length ? uid : @"-", start);
+        return nil;
+    }
+    NSLog(@"[DYYY-108] room hint: uid=%@ start=%.0f", uid, start);
+    return @{@"uid": uid, @"start": @(start)};
 }
