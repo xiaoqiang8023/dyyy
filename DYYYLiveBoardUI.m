@@ -123,6 +123,24 @@ void DYYYInstallLiveBoard(void) {
 
 @end
 
+// 2.2-9-108: 深色模式动态色（自适应系统）。浅色值与原来写死的值逐项
+// 一致（名字白 0.05、副标题白 0.30、组头白 0.35、选中底白 0.80），
+// 深色另给浅灰值；用 colorWithDynamicProvider（DYYYRadarBackground
+// 同款写法），系统外观变化时自动重解，不用手动监听。
+static UIColor *DYYYLiveBoardDynamicWhite(CGFloat lightWhite, CGFloat darkWhite) {
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
+        CGFloat w = trait.userInterfaceStyle == UIUserInterfaceStyleDark ? darkWhite : lightWhite;
+        return [UIColor colorWithWhite:w alpha:1.0];
+    }];
+}
+// 选中行底色：浅色白 0.80 × 弹窗背景透明度，深色白 0.16 × 同值。
+static UIColor *DYYYLiveBoardDynamicSelectedBackground(CGFloat alpha) {
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
+        CGFloat w = trait.userInterfaceStyle == UIUserInterfaceStyleDark ? 0.16 : 0.80;
+        return [UIColor colorWithWhite:w alpha:alpha];
+    }];
+}
+
 @interface DYYYLiveBoardViewController ()
 @property(nonatomic, strong) NSArray<NSDictionary *> *sorted;
 @property(nonatomic, strong) NSTimer *tickTimer;
@@ -191,16 +209,54 @@ void DYYYInstallLiveBoard(void) {
     [self stopTick];
 }
 
+// 2.2-9-108: 正在打开的底页时用户切系统外观，实时跟着变——动态色
+// 本身会自动重解，这里再重刷一次底色与行（导航栏属性与行配置是
+// 创建时算好的值，不重刷会停在旧外观上）。
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if (@available(iOS 13.0, *)) {
+        if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+            [self applySheetBackground];
+            [self.tableView reloadData];
+        }
+    }
+}
+
 #pragma mark - 排序与文案
+
+// 2.2-9-108: 房内主播判断——roomHint 的 uid 与榜单主播的 uid 对上
+//（两边都过 DYYYRadarString 归一化），该行就是当前房间的主播。
+- (BOOL)isRoomHintAnchor:(NSDictionary *)anchor {
+    NSString *uid = DYYYRadarString(self.roomHint[@"uid"]);
+    return uid.length > 0 && [uid isEqualToString:DYYYRadarString(anchor[@"uid"])];
+}
+// 在播判定：轮询已确认在播，或是房内主播（轮询还没刷到也算在播，
+// 只补时长与在播状态，不抢人数/场观）。
+- (BOOL)isLiveForAnchor:(NSDictionary *)anchor state:(NSDictionary *)state {
+    if ([state[@"live"] boolValue]) return YES;
+    return [self isRoomHintAnchor:anchor];
+}
+// 已播起点：轮询有数用轮询的，没有且是房内主播用打开榜单那一刻
+// 从房间取到的真实起点；都没有返回 0（不显示已播时长）。
+- (double)startForAnchor:(NSDictionary *)anchor state:(NSDictionary *)state {
+    double start = [state[@"start"] doubleValue];
+    if (start > 0) return start;
+    if ([self isRoomHintAnchor:anchor]) return [self.roomHint[@"start"] doubleValue];
+    return 0;
+}
 
 // 在播按人数从高到低，未开播沉底，从未查到过/只有失败的最后。
 // 人数没读到的在播按 0 算，排在有数的在播之后、未开播之前。
 - (void)resort {
     NSArray<NSDictionary *> *anchors = DYYYLiveBoardStore.shared.anchors;
+    __weak typeof(self) weakSelf = self;
     self.sorted = [anchors sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        DYYYLiveBoardViewController *self = weakSelf;
         NSDictionary *sa = [DYYYLiveBoardMonitor.shared stateForUID:a[@"uid"]];
         NSDictionary *sb = [DYYYLiveBoardMonitor.shared stateForUID:b[@"uid"]];
-        BOOL la = [sa[@"live"] boolValue], lb = [sb[@"live"] boolValue];
+        // 2.2-9-108：房内主播按在播排（轮询还没刷到也算在播组，人数
+        // 按 0 算、排在有数的在播之后、未开播之前）。
+        BOOL la = [self isLiveForAnchor:a state:sa], lb = [self isLiveForAnchor:b state:sb];
         if (la != lb) return la ? NSOrderedAscending : NSOrderedDescending;
         if (la) {
             long long va = [sa[@"viewers"] longLongValue], vb = [sb[@"viewers"] longLongValue];
@@ -220,7 +276,8 @@ void DYYYInstallLiveBoard(void) {
 - (NSString *)subtitleForAnchor:(NSDictionary *)anchor {
     NSDictionary *state = [DYYYLiveBoardMonitor.shared stateForUID:anchor[@"uid"]];
     NSString *error = DYYYRadarString(state[@"error"]);
-    if ([state[@"live"] boolValue]) {
+    // 2.2-9-108：轮询在播，或是房内主播（轮询还没刷到也显示在播）。
+    if ([self isLiveForAnchor:anchor state:state]) {
         if (self.compactListOnly) {
             // 2.2-9-93：紧凑模式副标题分两行写死换行，不让系统在词中换行——
             // 第 1 行“在播 · 在线人数”，第 2 行“场观 · 已播时长”；
@@ -232,7 +289,10 @@ void DYYYInstallLiveBoard(void) {
             NSMutableArray<NSString *> *line2Parts = [NSMutableArray array];
             NSNumber *total = state[@"totalViewers"];
             if (total.longLongValue > 0) [line2Parts addObject:[NSString stringWithFormat:@"场观 %@", DYYYLiveBoardFormatCountCompact(total.longLongValue)]];
-            NSString *digits = [state[@"start"] doubleValue] > 0 ? DYYYLiveBoardElapsedDigits([state[@"start"] doubleValue]) : nil;
+            // 2.2-9-108：已播起点优先轮询，轮询没有且是房内主播时
+            // 用打开榜单那一刻从房间取到的真实起点（每秒 tick 跟着走）。
+            double start = [self startForAnchor:anchor state:state];
+            NSString *digits = start > 0 ? DYYYLiveBoardElapsedDigits(start) : nil;
             if (digits.length) [line2Parts addObject:[NSString stringWithFormat:@"已播 %@", digits]];
             NSString *text = line1;
             if (line2Parts.count) text = [text stringByAppendingFormat:@"\n%@", [line2Parts componentsJoinedByString:@" · "]];
@@ -247,7 +307,8 @@ void DYYYInstallLiveBoard(void) {
         // 没读到时不显示，不显示“场观 0”。
         NSNumber *total = state[@"totalViewers"];
         if (total.longLongValue > 0) [text appendFormat:@" · 场观 %@", DYYYLiveBoardFormatCountCompact(total.longLongValue)];
-        NSString *digits = [state[@"start"] doubleValue] > 0 ? DYYYLiveBoardElapsedDigits([state[@"start"] doubleValue]) : nil;
+        double start = [self startForAnchor:anchor state:state];
+        NSString *digits = start > 0 ? DYYYLiveBoardElapsedDigits(start) : nil;
         if (digits.length) [text appendFormat:@" · 已播 %@", digits];
         if (error.length) [text appendString:@"\n上次刷新失败，显示的是上次数据"];
         return text;
@@ -263,7 +324,8 @@ void DYYYInstallLiveBoard(void) {
 // 只在紧凑模式调，完整模式继续走 plain secondaryText。
 - (NSAttributedString *)attributedSubtitleForAnchor:(NSDictionary *)anchor {
     NSString *subtitle = [self subtitleForAnchor:anchor];
-    UIColor *subColor = [UIColor colorWithWhite:0.30 alpha:1.0];
+    // 2.2-9-108：副标题深灰改动态色——浅色白 0.30（与原来一致），深色白 0.70。
+    UIColor *subColor = DYYYLiveBoardDynamicWhite(0.30, 0.70);
     NSMutableAttributedString *attr = [[NSMutableAttributedString alloc]
         initWithString:subtitle attributes:@{NSForegroundColorAttributeName: subColor}];
     if ([subtitle hasPrefix:@"●"]) {
@@ -294,7 +356,8 @@ void DYYYInstallLiveBoard(void) {
     // 2.2-9-95：底页文字加深——导航标题近黑、“关闭”按钮近黑
     //（tintColor 影响 plain 按钮；2.2-9-96 起右上角“添加主播”也是
     // plain，跟“关闭”一样近黑）；文字全不透明，滑杆行为不变。
-    UIColor *nearBlack = [UIColor colorWithWhite:0.05 alpha:1.0];
+    // 2.2-9-108：近黑改动态色——浅色白 0.05（与原来一致），深色白 0.95。
+    UIColor *nearBlack = DYYYLiveBoardDynamicWhite(0.05, 0.95);
     self.navigationController.navigationBar.titleTextAttributes = @{NSForegroundColorAttributeName: nearBlack};
     self.navigationController.navigationBar.tintColor = nearBlack;
     for (UITableViewCell *cell in self.tableView.visibleCells) {
@@ -362,10 +425,11 @@ void DYYYInstallLiveBoard(void) {
 }
 // 2.2-9-95：紧凑模式组头“主播 · N/20”加深（white 0.35）；完整模式
 // 与设置页不动（系统默认色）。
+// 2.2-9-108：组头改动态色——浅色白 0.35（与原来一致），深色白 0.60。
 - (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section {
     if (!self.compactListOnly || section != [self anchorSection]) return;
     if ([view isKindOfClass:UITableViewHeaderFooterView.class]) {
-        ((UITableViewHeaderFooterView *)view).textLabel.textColor = [UIColor colorWithWhite:0.35 alpha:1.0];
+        ((UITableViewHeaderFooterView *)view).textLabel.textColor = DYYYLiveBoardDynamicWhite(0.35, 0.60);
     }
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
@@ -405,14 +469,17 @@ void DYYYInstallLiveBoard(void) {
             cell.backgroundColor = bg;
             cell.contentView.backgroundColor = UIColor.clearColor;
             UIView *selectedBackground = [[UIView alloc] init];
-            selectedBackground.backgroundColor = [UIColor colorWithWhite:0.80 alpha:alpha];
+            // 2.2-9-108：选中底改动态色——浅色白 0.80 × 弹窗背景透明度
+            //（与原来一致），深色白 0.16 × 同值。
+            selectedBackground.backgroundColor = DYYYLiveBoardDynamicSelectedBackground(alpha);
             cell.selectedBackgroundView = selectedBackground;
             // 2.2-9-95：底页文字加深——名字近黑（white 0.05）、副标题
             // 深灰（white 0.30，富文本里自带同色），两行副标题不裁剪；
             // 在播行开头的 ● 涂绿（attributedSubtitleForAnchor:）。
+            // 2.2-9-108：两处都改动态色，深色下变浅，浅色与原来一致。
             UIListContentConfiguration *config = [(UIListContentConfiguration *)cell.contentConfiguration copy];
-            config.textProperties.color = [UIColor colorWithWhite:0.05 alpha:1.0];
-            config.secondaryTextProperties.color = [UIColor colorWithWhite:0.30 alpha:1.0];
+            config.textProperties.color = DYYYLiveBoardDynamicWhite(0.05, 0.95);
+            config.secondaryTextProperties.color = DYYYLiveBoardDynamicWhite(0.30, 0.70);
             config.secondaryTextProperties.numberOfLines = 0;
             config.secondaryAttributedText = [self attributedSubtitleForAnchor:anchor];
             cell.contentConfiguration = config;
