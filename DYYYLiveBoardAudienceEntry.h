@@ -21,12 +21,18 @@ extern "C" {
 // 幂等（tag 守卫 + 已装按钮弱引用快路）：面板每次打开都可重调，不会叠加。
 // 2.2-9-87：每次安装尝试都把结果写进 NSUserDefaults（DYYYLiveBoardEntryDiag），
 // 榜单设置页第 0 组页脚现读现显——用户不用找日志，截设置页图就能定位。
+// 2.2-9-93：入口诊断已关闭（用户要求），这段只留作历史，见 .m。
 // 2.2-9-90：供长按菜单入口复用：从 from 出发走到最上层已呈现的控制器，
 // 再 present 榜单页（全屏导航 + “关闭”按钮）。打开榜单的 target 用关联
 // 对象挂在 boardVC 上保活（UIBarButtonItem 不 retain target）。
 void DYYYLiveBoardPresentBoardFromViewController(UIViewController *from);
 
-// 2.2-9-90：给长按入口写诊断（进 -89 的最近 3 条环 + [DYYY-90] 日志）。
+// 2.2-9-93：胶囊点开的紧凑榜单（compactListOnly，只含主播列表）。
+// 其他入口继续走上面的完整页。
+void DYYYLiveBoardPresentCompactBoardFromViewController(UIViewController *from);
+
+// 2.2-9-93：入口诊断已关闭——RecordDiagLine 保留（调用点不动），
+// 但不再写任何诊断（见 .m 的 DYYYLiveBoardEntryRecordDiag）。
 void DYYYLiveBoardEntryRecordDiagLine(NSString *outcome, UIViewController *vc);
 
 void DYYYLiveBoardAudienceEntryInstall(UIViewController *audienceVC);
@@ -45,9 +51,8 @@ BOOL DYYYLiveBoardAudienceEntryIsOwnViewController(UIViewController *vc);
 void DYYYLiveBoardAudienceEntryStartWatcher(UIViewController *roomVC);
 void DYYYLiveBoardAudienceEntryStopWatcher(void);
 
-// 2.2-9-87：读最近 3 条安装尝试的诊断（最新在前）+ watcher 心跳行
-//（2.2-9-89：环 + 心跳；无记录时返回“入口诊断：暂无记录……”）。
-// 供榜单设置页页脚现读现显。
+// 2.2-9-93：入口诊断已关闭——本函数保留作死代码（不再被设置页调用），
+// 不再写新诊断、不再读心跳；字面量“入口诊断”只剩在这里。
 NSString *DYYYLiveBoardAudienceEntryDiagText(void);
 
 #ifdef __cplusplus
