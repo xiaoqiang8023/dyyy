@@ -928,7 +928,15 @@ typedef NS_ENUM(NSUInteger, DYEdgeMode) {
 @end
 
 @interface AWEIMInputActionBarInteractor : UIView
+@property (nonatomic, readonly) id barMaker;
 - (void)p_setupUI;
+- (void)p_layoutActionBarShowAnimated:(BOOL)animated;
+- (void)p_layoutActionBarDismissAnimated:(BOOL)animated;
+- (BOOL)p_shouldShowActionBarAfterTypeResolved;
+- (BOOL)p_shouldShowInputActionBarWithInputType:(NSInteger)type;
+- (BOOL)canShowBarWhenInputTypeChangedTo:(long long)type;
+- (void)hideActionBarIfNeeded;
+- (void)showActionBarIfPossible;
 @end
 
 @interface AWELiveFeedStatusLabel : UILabel
@@ -1330,6 +1338,7 @@ typedef NS_ENUM(NSUInteger, DYEdgeMode) {
 @interface IESLiveAudienceViewController : UIViewController
 - (BOOL)prefersStatusBarHidden;
 @end
+
 @interface AWEAwemeDetailTableViewController : UIViewController
 - (BOOL)prefersStatusBarHidden;
 - (CGFloat)baseTableViewBottomInset;
@@ -1659,6 +1668,11 @@ typedef NS_ENUM(NSUInteger, DYEdgeMode) {
 @end
 
 @interface IESIMInputViewController : UIViewController
+@property (nonatomic, readonly) BOOL isCompanyChat;
+@property (nonatomic, readonly) BOOL isShowingInPOIIMConversationViewController;
+@property (nonatomic, readonly) BOOL isShowingInFeedDetailViewController;
+@property (nonatomic, readonly) BOOL isShowingInImageVideoDisplayViewController;
+@property (nonatomic, readonly) long long currentInputType;
 @end
 
 // 液态玻璃补 -51：应用内通知横幅与聊天页实际类
@@ -1669,6 +1683,188 @@ typedef NS_ENUM(NSUInteger, DYEdgeMode) {
 @end
 
 @interface AWEIMMessageBaseViewController : UIViewController
+@end
+
+#pragma mark - 消息页精简用到的类（2.2-9-99，DYKiller 移植，抖音 40.8.0 类名，40.9.0 未验证；%hook 钩不到即 no-op）
+@interface AWEIMComponentContext : NSObject
+@property (nonatomic, weak) UIViewController *hostViewController;
+@end
+@interface AWEIMComponentManager : NSObject
+@property (nonatomic, strong) NSArray *components;
+@end
+@interface AWEIMComponentBase : NSObject
+@property (nonatomic, weak) AWEIMComponentContext *context;
+@property (nonatomic, weak) AWEIMComponentManager *belongingManager;
+@end
+@interface AWEIMMessageTabNaviBarComponent : NSObject
+@property (nonatomic, copy) NSArray *rightFirstBtnComponents;
+@property (nonatomic, copy) NSArray *rightSecondBtnComponents;
+- (void)reloadNaviBarButtons;
+@end
+@interface AWEIMMessageTabSideBarButtonComponent : NSObject
+- (BOOL)canShowInNaviBar;
+@end
+@interface AWEIMMessageTabNavBarResourceSlotComponent : NSObject
+- (BOOL)canShowInNaviBar;
+@end
+@interface AWEIMMessageTabNavBarResourceSlotComponentV2 : NSObject
+- (BOOL)canShowInNaviBar;
+@end
+@interface AWEIMMessageTabSearchComponent : NSObject
+- (BOOL)canShowInNaviBar;
+@end
+@interface AWEIMMessageTabPlusButtonComponent : NSObject
+- (BOOL)canShowInNaviBar;
+@end
+@interface RxDiffableDataSourceSnapshot : NSObject
+- (NSArray *)sectionIdentifiers;
+- (NSArray *)itemIdentifiers;
+- (NSArray *)itemIdentifiersInSectionWithIdentifier:(id)sectionIdentifier;
+- (void)deleteItemsWithIdentifiers:(NSArray *)identifiers;
+@end
+@interface RxCollectionViewDiffableDataSource : NSObject
+- (RxDiffableDataSourceSnapshot *)snapshot;
+@end
+@interface AWEIMOnlineContactAvatarViewModel : NSObject
+@property (nonatomic, assign, readonly) NSUInteger vmType;
+@end
+@interface AWEIMSkylightBizViewModel : AWEIMOnlineContactAvatarViewModel
+@end
+@interface AWEIMSkylightCellViewModel : NSObject
+@property (nonatomic, strong, readonly) AWEIMOnlineContactAvatarViewModel *model;
+@end
+@interface AWEIMSkylightCommonCell : UICollectionViewCell
+- (void)renderWithViewModel:(AWEIMSkylightCellViewModel *)viewModel;
+@end
+@interface AWEIMSkylightViewComponent : NSObject
+@property (nonatomic, strong, readonly) RxCollectionViewDiffableDataSource *dataSource;
+@property (nonatomic, strong, readonly) UICollectionView *collectionView;
+- (void)applySnapshot:(RxDiffableDataSourceSnapshot *)snapshot animatingDifferences:(BOOL)animating completion:(id)completion;
+@end
+@interface AWEIMSkylightDataComponent : NSObject
+- (BOOL)shouldHidden;
+@end
+@interface AWEIMSkylightListView : UIView
+@property (nonatomic, strong, readonly) AWEIMSkylightViewComponent *skylightInterface;
+- (void)refreshWithIgnoreFrequency:(BOOL)ignoreFrequency;
+- (void)performShouldHiddenDelegate;
+- (void)viewWillAppear;
+@end
+@interface AWEIMChatModel : NSObject
+@property (nonatomic, assign, readonly) NSInteger type;
+@property (nonatomic, copy, readonly) NSString *sessionId;
+@end
+@interface AWEIMChatCellViewModel : NSObject
+@property (nonatomic, strong, readonly) AWEIMChatModel *chat;
+@end
+@interface AWEIMChatListCommonCell : UITableViewCell
+@property (nonatomic, strong, readonly) AWEIMChatCellViewModel *cellViewModel;
+- (void)renderWithHolder:(id)holder;
+@end
+@interface IESIMOfficialChatDataSource : NSObject
+- (BOOL)p_canShowOfficialChat:(AWEIMChatModel *)chat;
+- (void)p_updateChatListWithUpsert:(NSArray *)upsert remove:(NSArray *)remove;
+- (AWEIMChatModel *)chatWithSession:(NSString *)sessionId;
+@end
+@interface IESIMInputLayoutComponent : AWEIMComponentBase
+- (void)refreshLayout;
+- (void)p_layoutInputViewsAfterAdjustButtons;
+- (void)pp_layoutSubviewsWithAnimated:(BOOL)animated context:(id)context;
+@end
+@interface IESIMInputLeftComponentPolicy : AWEIMComponentBase
+- (NSArray *)leftButtonsForShow;
+@end
+@interface IESIMInputRightComponentPolicy : AWEIMComponentBase
+- (NSArray *)rightButtonsForShow;
+@end
+@interface IESIMInputPlayEntryComponent : AWEIMComponentBase
+@end
+@interface AWEIMQuickSelectPhotoInteractor : AWEIMComponentBase
+- (BOOL)canShowBarWhenInputTypeChangedTo:(long long)type;
+@end
+@interface AWEIMMessageListNaviBarComponent : AWEIMComponentBase
+@property (nonatomic, weak) AWENavigationBar *naviBar;
+@property (nonatomic, weak) id naviBarTitleService;
+- (void)setNeedsUpdateNaviBar;
+@end
+@interface AWEIMNavigationUnreadView : UIView
+@property (nonatomic, strong) UIButton *backButton;
+@property (nonatomic, strong) UIView *unreadCountView;
+@property (nonatomic, strong) CAShapeLayer *dotLayer;
+@property (nonatomic, strong) UILabel *dotLabel;
+- (void)updateWithCount:(long long)count;
+@end
+@interface AWEIMMessageListNaviBarTitleAvatarComponent : AWEIMComponentBase
+@property (nonatomic, strong) UIView *contentView;
+@property (nonatomic, strong) CAShapeLayer *notchLayer;
+@property (nonatomic, strong) UIView *onlineDotView;
+- (void)p_updateDots;
+@end
+@interface AWEIMMessageListOnLineComponent : AWEIMComponentBase
+- (UIView *)naviBarTitleCustomView;
+@end
+@interface AWEIMMessageListNaviBarBackAndUnreadCountComponent : AWEIMComponentBase
+- (UIView *)naviBarView;
+@end
+@interface AWEIMMessageListNaviVoIPEntryComponent : AWEIMComponentBase
+- (UIView *)naviBarView;
+@end
+@interface AWEIMMessageListNaviBarChatDetailComponent : AWEIMComponentBase
+- (UIView *)naviBarView;
+@end
+@interface AWEIMMessageListNaviBarGroupZoneToggleComponent : AWEIMComponentBase
+- (UIView *)naviBarView;
+@end
+@interface AWEIMGroupZoneConversationComponent : AWEIMComponentBase
+- (BOOL)isGroupZoneExpanded;
+- (void)toggleGroupZoneExpanded:(BOOL)animated;
+- (double)desiredGroupZoneHeight;
+@end
+
+#pragma mark - 个人主页功能区入口卡片（2.2-9-99，DYKiller 移植，抖音 40.8.0 类名，40.9.0 未验证；DYYYProfileEntryAvailable() 运行时校验，缺失则静默不装）
+@interface AWEProfileHeaderContext : NSObject
+- (BOOL)isCurrentUser;
+@end
+@interface AWEProfileExtensionAreaCardModel : NSObject
+@property (nonatomic, assign) unsigned long long cardType;
+@property (nonatomic, copy) NSString *title;
+@end
+@interface AWEProfileExtensionAreaContext : NSObject
+- (id)userModel;
+- (AWEProfileHeaderContext *)profileHeaderContext;
+- (id)dataSource;
+@end
+@interface AWEProfileEAVajraDataSource : NSObject
+- (void)setCardList:(NSArray *)cardList;
+- (void)refreshUserModel:(id)userModel;
+- (AWEProfileExtensionAreaContext *)context;
+@end
+@interface AWEProfileEAVajraViewHolder : NSObject
+- (void)setCardList:(NSArray *)cardList;
+- (NSArray *)cardList;
+- (UIView *)cardViewWithCardModel:(AWEProfileExtensionAreaCardModel *)cardModel;
+- (AWEProfileExtensionAreaContext *)context;
+- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath;
+- (void)collectionView:(UICollectionView *)collectionView willDisplayCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)indexPath;
+- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath;
+- (NSArray *)indexPathsForVisibleItems;
+- (void)cardWillDisplayAtIndexPath:(NSIndexPath *)indexPath;
+- (void)cardDidLoadAtIndexPath:(NSIndexPath *)indexPath;
+- (void)cardDidClickAtIndexPath:(NSIndexPath *)indexPath;
+@end
+@interface AWEProfileExtensionAreaCell : UICollectionViewCell
+- (void)addCardView:(UIView *)cardView;
+@end
+@interface AWEProfileExtensionAreaVajraStyleCardView : UIView
+- (AWEProfileExtensionAreaCardModel *)cardModel;
+- (void)configWithCardModel:(AWEProfileExtensionAreaCardModel *)cardModel;
+- (UIImageView *)imageView;
+- (UILabel *)titleLabel;
+- (void)updateImageViewWithLightUrlArray:(id)lightUrls darkUrlArray:(id)darkUrls;
+- (void)updateImageViewWithLightUrlArray:(id)lightUrls darkUrlArray:(id)darkUrls completion:(id)completion;
+@end
+@interface UIImage (AWEProfileSVG)
++ (UIImage *)svg_userProfileImageWithName:(NSString *)name size:(CGSize)size color:(UIColor *)color;
 @end
 
 @interface AWEIMEmoticonPanelContainerView : UIView
